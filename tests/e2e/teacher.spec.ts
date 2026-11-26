@@ -6,15 +6,31 @@ async function generate(page: Page, text: string) {
   await expect(page.getByTestId('t-generate')).toHaveText(/Сгенерировать/);
 }
 
+/** Экспорт: содержимое берём из Blob, переданного в URL.createObjectURL (работает на всех профилях);
+ *  на ноутбучном профиле дополнительно проверяем, что браузер действительно скачал файл. */
 async function exportJson(page: Page) {
-  const dl = page.waitForEvent('download');
+  const mobile = page.viewportSize()!.width < 768;
+  const dl = mobile ? null : page.waitForEvent('download');
+  await page.evaluate(() => { (window as unknown as { __exports: string[] }).__exports = []; });
   await page.getByTestId('t-export').click();
-  const file = await (await dl).path();
-  const { readFile } = await import('node:fs/promises');
-  return JSON.parse(await readFile(file, 'utf8')) as { sentences: { id: string }[]; tasks: { evidenceSets: string[][] }[] };
+  const text = await page.waitForFunction(() => (window as unknown as { __exports: string[] }).__exports[0]).then((h) => h.jsonValue());
+  if (dl) {
+    const { readFile } = await import('node:fs/promises');
+    const download = await dl;
+    expect(download.suggestedFilename()).toMatch(/\.json$/);
+    expect(await readFile((await download.path())!, 'utf8')).toBe(text);
+  }
+  return JSON.parse(text as string) as { sentences: { id: string }[]; tasks: { evidenceSets: string[][] }[] };
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const orig = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (obj: Blob | MediaSource) => {
+      if (obj instanceof Blob) void obj.text().then((t) => (window as unknown as { __exports?: string[] }).__exports?.push(t));
+      return orig(obj);
+    };
+  });
   await page.goto('/');
   await page.getByTestId('mode-teacher').click();
   await expect(page.getByTestId('t-health')).toContainText('Ollama готова');
