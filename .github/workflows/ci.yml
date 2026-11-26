@@ -13,6 +13,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
         env: { CI: 'true' }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
       - run: VITE_STUDENT_ONLY=true npm run build
       - uses: actions/upload-artifact@v4
         with: { name: student-static-demo, path: dist }
