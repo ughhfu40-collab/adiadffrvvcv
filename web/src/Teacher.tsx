@@ -57,8 +57,10 @@ export function Teacher() {
     if (!validation?.ok) return;
     const blob = new Blob([JSON.stringify(validation.lesson, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `${validation.lesson.id}.json`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    a.href = URL.createObjectURL(blob); a.download = `${validation.lesson.id}.json`; a.rel = 'noopener';
+    // Ссылка должна быть в DOM: мобильный Chrome игнорирует click() по неприкреплённой ссылке.
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   }
 
   return (
