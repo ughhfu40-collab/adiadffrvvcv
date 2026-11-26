@@ -44,6 +44,8 @@ test('два черновика подряд: поле доказательст�
 
   await generate(page, 'Альфа идёт. Бета идёт. Гамма идёт. Дельта идёт. Эпсилон идёт.');
   await expect(page.getByTestId('t-evidence-0')).toHaveValue('s5');
+  // Редактор не должен вылезать за ширину экрана (иначе поля перекрывают кнопки на телефоне).
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByTestId('t-evidence-1')).toHaveValue('s1,s5');
   await expect(page.getByTestId('t-evidence-2')).toHaveValue('s1,s2; s2,s5');
   const json = await exportJson(page);

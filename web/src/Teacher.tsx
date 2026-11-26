@@ -68,7 +68,7 @@ export function Teacher() {
       <section className="card space-y-3">
         <h2 className="h2">1. Текст</h2>
         <div className="flex flex-wrap gap-2">
-          <input className="input flex-1" placeholder="Название урока" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="input min-w-0 flex-1" placeholder="Название урока" value={title} onChange={(e) => setTitle(e.target.value)} />
           <select className="input" value={language} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
             <option value="ru">Русский</option><option value="kk">Қазақша</option>
           </select>
@@ -104,18 +104,18 @@ export function Teacher() {
           {serverErrors.length > 0 && <div className="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950" role="alert"><b>Модель ошиблась в ссылках — исправьте поля ниже:</b><ul className="list-disc pl-5">{serverErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
           <input className="input w-full" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
           {draft.tasks.map((t, i) => (
-            <fieldset key={`${rev}-${i}`} className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-              <div className="flex gap-2">
-                <select className="input" value={t.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })}>
+            <fieldset key={`${rev}-${i}`} className="min-w-0 space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <select className="input max-w-full" value={t.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })}>
                   <option value="find">find — факт</option><option value="match">match — сопоставить</option><option value="infer">infer — вывод</option>
                 </select>
-                <input className="input flex-1" placeholder="Вопрос" value={t.question} onChange={(e) => updTask(i, { question: e.target.value })} />
+                <input className="input min-w-0 flex-1" placeholder="Вопрос" value={t.question} onChange={(e) => updTask(i, { question: e.target.value })} />
               </div>
               {t.options.map((o, k) => (
                 <div key={k} className="flex items-center gap-2">
                   <input type="radio" name={`correct-${i}`} checked={t.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title="Правильный ответ" />
                   <span className="font-mono text-xs">{o.id}</span>
-                  <input className="input flex-1" value={o.text} onChange={(e) => updTask(i, { options: t.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
+                  <input className="input min-w-0 flex-1" value={o.text} onChange={(e) => updTask(i, { options: t.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
                 </div>
               ))}
               <label className="block text-sm">Доказательства (наборы через «;», ID через «,»):
