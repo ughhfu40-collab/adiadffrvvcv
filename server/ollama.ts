@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaskSchema, LessonSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
+import { TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
 
 export const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
@@ -67,20 +67,22 @@ export async function ollamaStatus(): Promise<{ ok: boolean; model: string; url:
 
 export type GenerateResult =
   | { ok: true; lesson: Lesson }
-  | { ok: false; errors: string[]; draft: unknown };
+  /** Структура цела, но есть ошибки ссылок (ID доказательств / ответа) — черновик можно править. */
+  | { ok: false; kind: 'references'; errors: string[]; draft: Lesson }
+  /** Структура сломана — черновик не отдаём, клиент сохраняет предыдущий. */
+  | { ok: false; kind: 'structure'; errors: string[] };
 
 /** Собирает урок из ответа модели и проверяет общей схемой (ID предложений, ссылки на варианты). */
 export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language }, sentences: { id: string; text: string }[]): GenerateResult {
   const parsed = DraftSchema.safeParse(raw);
-  const candidate = {
-    ...meta,
-    grade: 8,
-    sentences,
-    tasks: parsed.success ? parsed.data.tasks : ((raw as { tasks?: unknown })?.tasks ?? []),
-  };
-  if (!parsed.success) return { ok: false, errors: formatIssues(parsed.error), draft: candidate };
+  if (!parsed.success) {
+    return { ok: false, kind: 'structure', errors: ['Модель вернула черновик неверной структуры', ...formatIssues(parsed.error)] };
+  }
+  const candidate = { ...meta, grade: 8, sentences, tasks: parsed.data.tasks };
+  const base = LessonBaseSchema.safeParse(candidate);
+  if (!base.success) return { ok: false, kind: 'structure', errors: ['Черновик не соответствует схеме урока', ...formatIssues(base.error)] };
   const full = LessonSchema.safeParse(candidate);
-  return full.success ? { ok: true, lesson: full.data } : { ok: false, errors: formatIssues(full.error), draft: candidate };
+  return full.success ? { ok: true, lesson: full.data } : { ok: false, kind: 'references', errors: formatIssues(full.error), draft: base.data };
 }
 
 export async function generateLesson(input: { text: string; language: Language; title: string }, fetchImpl: typeof fetch = fetch): Promise<GenerateResult> {
@@ -108,7 +110,7 @@ export async function generateLesson(input: { text: string; language: Language; 
   try {
     raw = JSON.parse(body.message?.content ?? '');
   } catch {
-    return { ok: false, errors: ['Модель вернула не JSON'], draft: { sentences } };
+    return { ok: false, kind: 'structure', errors: ['Модель вернула не JSON'] };
   }
   const slug = `gen-${input.language}-${Date.now().toString(36)}`;
   return assembleDraft(raw, { id: slug, title: input.title || 'Новый урок', language: input.language }, sentences);

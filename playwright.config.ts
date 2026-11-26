@@ -7,5 +7,11 @@ export default defineConfig({
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
-  webServer: { command: 'npm run build && npm run preview -- --host 127.0.0.1', url: 'http://127.0.0.1:4173', reuseExistingServer: !process.env.CI, timeout: 120_000 },
+  webServer: [
+    { command: 'npx tsx tests/e2e/fake-ollama.ts', url: 'http://127.0.0.1:11535/api/tags', reuseExistingServer: false },
+    { command: 'tsx server/index.ts', url: 'http://127.0.0.1:8797/api/health', reuseExistingServer: false,
+      env: { PORT: '8797', OLLAMA_URL: 'http://127.0.0.1:11535', OLLAMA_MODEL: 'fake', NODE_ENV: 'test' } },
+    { command: 'npm run build && npm run preview -- --host 127.0.0.1', url: 'http://127.0.0.1:4173', reuseExistingServer: false, timeout: 120_000,
+      env: { API_TARGET: 'http://127.0.0.1:8797' } },
+  ],
 });

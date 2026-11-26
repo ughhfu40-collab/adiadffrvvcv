@@ -48,3 +48,30 @@ describe('сервер: проверка черновика модели', () =>
     expect(res.statusCode).toBe(422);
   });
 });
+
+describe('сервер: структурно неверные ответы модели', () => {
+  it('tasks: {} → structure, без черновика', () => {
+    const r = assembleDraft({ tasks: {} }, meta, sentences);
+    expect(r).toMatchObject({ ok: false, kind: 'structure' });
+    expect('draft' in r).toBe(false);
+  });
+  it('options: null → structure', () => {
+    const bad = structuredClone(goodTasks) as { tasks: Record<string, unknown>[] };
+    bad.tasks[0]!.options = null;
+    expect(assembleDraft(bad, meta, sentences)).toMatchObject({ ok: false, kind: 'structure' });
+  });
+  it('ошибка только в ссылках → references с редактируемым черновиком', () => {
+    const bad = structuredClone(goodTasks);
+    bad.tasks[0]!.evidenceSets = [['s9']];
+    const r = assembleDraft(bad, meta, sentences);
+    expect(r).toMatchObject({ ok: false, kind: 'references' });
+    if (!r.ok && r.kind === 'references') expect(r.draft.tasks[0]!.evidenceSets).toEqual([['s9']]);
+  });
+  it('/api/generate возвращает 422 с kind', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ message: { content: '{"tasks":{}}' } }))));
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru' } });
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ kind: 'structure' });
+  });
+});

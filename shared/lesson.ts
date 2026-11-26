@@ -33,7 +33,8 @@ export const TaskSchema = z.object({
 });
 export type Task = z.infer<typeof TaskSchema>;
 
-const LessonBaseSchema = z.object({
+/** Только структура, без ссылочной проверки — для редактируемых черновиков. */
+export const LessonBaseSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   title: z.string().min(1),
   language: LanguageSchema,
@@ -67,6 +68,11 @@ export const LessonSchema = LessonBaseSchema.superRefine((lesson, ctx) => {
   });
 });
 export type Lesson = z.infer<typeof LessonSchema>;
+
+/** Структурно корректный черновик (можно открыть в редакторе). */
+export function isEditableDraft(data: unknown): data is Lesson {
+  return LessonBaseSchema.safeParse(data).success;
+}
 
 export type ValidationResult = { ok: true; lesson: Lesson } | { ok: false; errors: string[] };
 

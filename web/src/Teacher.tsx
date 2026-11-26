@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
+import { isEditableDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, type Health } from './api';
 import { db } from './db';
 
@@ -15,29 +15,35 @@ export function Teacher() {
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [genError, setGenError] = useState<{ reason: string; command?: string } | null>(null);
   const [saved, setSaved] = useState('');
+  const [structErrors, setStructErrors] = useState<string[]>([]);
+  /** Ревизия загруженного черновика: меняется при каждой загрузке извне и пересоздаёт поля редактора. */
+  const [rev, setRev] = useState(0);
+  const loadDraft = (d: Lesson) => { setDraft(d); setRev((r) => r + 1); };
   const sentences = useMemo(() => splitSentences(text), [text]);
 
-  useEffect(() => { void getHealth().then(setHealth); void db.drafts.get('current').then((d) => { if (d) setDraft(d.data as Lesson); }); }, []);
+  useEffect(() => { void getHealth().then(setHealth); void db.drafts.get('current').then((d) => { if (d && isEditableDraft(d.data)) loadDraft(d.data); }); }, []);
   useEffect(() => { if (draft) void db.drafts.put({ id: 'current', data: draft, updatedAt: Date.now() }); }, [draft]);
 
   const validation = draft ? validateLesson(draft) : null;
   const ollamaOk = health && 'ollama' in health && health.ollama.ok;
 
   async function generate() {
-    setBusy(true); setGenError(null); setServerErrors([]); setSaved('');
+    setBusy(true); setGenError(null); setServerErrors([]); setStructErrors([]); setSaved('');
     try {
       const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title }) });
-      const body = (await r.json()) as { ok: boolean; lesson?: Lesson; draft?: Lesson; errors?: string[]; reason?: string; startCommand?: string };
+      const body = (await r.json()) as { ok: boolean; kind?: string; lesson?: unknown; draft?: unknown; errors?: string[]; reason?: string; startCommand?: string };
       if (r.status === 503) setGenError({ reason: body.reason ?? 'Модель недоступна', command: body.startCommand });
-      else if (body.lesson) setDraft(body.lesson);
-      else { if (body.draft) setDraft(normalize(body.draft)); setServerErrors(body.errors ?? ['Ошибка генерации']); }
+      else if (r.status === 400) setGenError({ reason: `Запрос отклонён: ${(body.errors ?? []).join('; ') || 'неверные данные'}` });
+      else if (body.ok && isEditableDraft(body.lesson)) loadDraft(body.lesson);
+      else if (body.kind === 'references' && isEditableDraft(body.draft)) { loadDraft(body.draft); setServerErrors(body.errors ?? []); }
+      else setStructErrors(body.errors?.length ? body.errors : ['Сервер вернул черновик неверной структуры']);
     } catch (e) {
       setGenError({ reason: `Сервер недоступен: ${(e as Error).message}`, command: 'npm run server' });
     } finally { setBusy(false); }
   }
 
   function manualDraft() {
-    setDraft({ id: `manual-${Date.now().toString(36)}`, title: title || 'Новый урок', language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
+    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title || 'Новый урок', language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
   const updTask = (i: number, patch: Partial<Task>) => setDraft((d) => d && { ...d, tasks: d.tasks.map((t, k) => (k === i ? { ...t, ...patch } : t)) });
@@ -81,16 +87,22 @@ export function Teacher() {
           <button className="btn-ghost" disabled={sentences.length < 2} onClick={manualDraft}>Составить вручную</button>
           {!ollamaOk && <span className="self-center text-xs text-slate-500">Без модели доступны ручной черновик, просмотр и импорт.</span>}
         </div>
+        {structErrors.length > 0 && (
+          <div role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200" data-testid="t-struct-error">
+            <b>Черновик не загружен: модель вернула неверную структуру.</b> {draft ? 'Предыдущий черновик сохранён ниже.' : ''} Попробуйте сгенерировать ещё раз или составьте вручную.
+            <ul className="list-disc pl-5">{structErrors.slice(0, 6).map((e) => <li key={e}>{e}</li>)}</ul>
+          </div>
+        )}
         {genError && <div role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200" data-testid="t-gen-error">{genError.reason}{genError.command && <> — команда: <code>{genError.command}</code></>}</div>}
       </section>
 
       {draft && (
         <section className="card space-y-4" data-testid="t-draft">
           <h2 className="h2">2. Черновик — проверьте и исправьте</h2>
-          {serverErrors.length > 0 && <div className="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950" role="alert"><b>Сервер нашёл ошибки в ответе модели:</b><ul className="list-disc pl-5">{serverErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
+          {serverErrors.length > 0 && <div className="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950" role="alert"><b>Модель ошиблась в ссылках — исправьте поля ниже:</b><ul className="list-disc pl-5">{serverErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
           <input className="input w-full" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
           {draft.tasks.map((t, i) => (
-            <fieldset key={i} className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <fieldset key={`${rev}-${i}`} className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
               <div className="flex gap-2">
                 <select className="input" value={t.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })}>
                   <option value="find">find — факт</option><option value="match">match — сопоставить</option><option value="infer">infer — вывод</option>
@@ -105,8 +117,7 @@ export function Teacher() {
                 </div>
               ))}
               <label className="block text-sm">Доказательства (наборы через «;», ID через «,»):
-                <input className="input w-full font-mono" defaultValue={t.evidenceSets.map((s) => s.join(',')).join('; ')}
-                  onBlur={(e) => updTask(i, { evidenceSets: e.target.value.split(';').map((s) => s.split(',').map((x) => x.trim()).filter(Boolean)).filter((s) => s.length) })} />
+                <EvidenceField key={`${rev}-${i}`} value={t.evidenceSets} testId={`t-evidence-${i}`} onChange={(evidenceSets) => updTask(i, { evidenceSets })} />
               </label>
               <input className="input w-full" placeholder="Подсказка" value={t.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
             </fieldset>
@@ -124,6 +135,15 @@ export function Teacher() {
   );
 }
 
-function normalize(d: Lesson): Lesson {
-  return { ...d, tasks: (d.tasks ?? []).map((t, i) => ({ ...emptyTask(i + 1, 'find'), ...t })) };
+const fmtEvidence = (sets: string[][]) => sets.map((x) => x.join(',')).join('; ');
+const parseEvidence = (v: string) => v.split(';').map((x) => x.split(',').map((y) => y.trim()).filter(Boolean)).filter((x) => x.length);
+
+/** Поле наборов доказательств: локальный текст для ввода, синхронизация с черновиком на каждое изменение. */
+function EvidenceField({ value, onChange, testId }: { value: string[][]; onChange: (v: string[][]) => void; testId: string }) {
+  const [text, setText] = useState(() => fmtEvidence(value));
+  return (
+    <input className="input w-full font-mono" data-testid={testId} value={text}
+      onChange={(e) => { setText(e.target.value); onChange(parseEvidence(e.target.value)); }}
+      onBlur={() => setText(fmtEvidence(value))} />
+  );
 }

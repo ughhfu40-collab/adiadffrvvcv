@@ -49,6 +49,8 @@ npm run typecheck   # TypeScript strict
 npm test            # Vitest: логика проверки, схема, импорт, IndexedDB, сервер
 npm run test:e2e    # Playwright (desktop + mobile): production-сборка, офлайн, импорт, учитель
 ```
+e2e поднимает поддельную Ollama (`tests/e2e/fake-ollama.ts`) и настоящий Fastify-сервер: проверяются два черновика подряд (поле доказательств и экспорт JSON), ответы модели с `tasks: {}` и `options: null` (ошибка + предыдущий черновик сохраняется) и ошибки только в ID (черновик открывается для исправления).
+
 CI (`.github/workflows/ci.yml`) делает всё это и собирает статическое демо как артефакт.
 
 ## Как устроено

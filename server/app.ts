@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { LanguageSchema, validateLesson } from '../shared/lesson';
 import { generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL } from './ollama';
 
-const GenerateBody = z.object({ text: z.string().min(20).max(6000), language: LanguageSchema, title: z.string().max(120).default('') });
+const GenerateBody = z.object({ text: z.string().min(20, 'Текст слишком короткий (нужно от 20 символов)').max(6000), language: LanguageSchema, title: z.string().max(120).default('') });
 
 export function startCommand() {
   return `ollama serve & ollama pull ${OLLAMA_MODEL}`;

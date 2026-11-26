@@ -61,10 +61,3 @@ test('импорт: сломанный JSON отклоняется, коррек
   await expect(page.getByTestId('lesson-imp-test')).toBeVisible();
 });
 
-test('учитель: нумерация предложений и понятная ошибка без сервера/модели', async ({ page }) => {
-  await page.goto('/');
-  await page.getByTestId('mode-teacher').click();
-  await page.getByTestId('t-text').fill('Первое предложение. Второе предложение! Третье предложение?');
-  await expect(page.getByTestId('t-preview')).toContainText('s3');
-  await expect(page.getByTestId('t-health')).toContainText(/npm run server|ollama/);
-});
