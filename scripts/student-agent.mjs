@@ -2,7 +2,7 @@
 // читает обратную связь, исправляет (не выбирая ответ заново), проходит до конца, на середине уходит в офлайн.
 // Проверяет, что обратная связь верная и на языке урока, прогресс сохраняется. Телефон — ЭМУЛЯЦИЯ Playwright.
 // node scripts/student-agent.mjs <url> [phone|laptop|both]
-import { chromium, devices } from '@playwright/test';
+import { chromium, devices, expect } from '@playwright/test';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 const URL_ = process.argv[2] ?? 'http://127.0.0.1:4673/';
 const which = process.argv[3] ?? 'both';
@@ -85,8 +85,12 @@ for (const [pname, prof] of Object.entries(profiles)) {
     // Рекомендация считается асинхронно, экран завершения на телефоне плавно прокручивается — ждём и то, и другое.
     const recShown = await p.locator('[data-testid="recommendation"], [data-testid="no-recommendation"]').first().waitFor({ timeout: 5000 }).then(() => true, () => false);
     const rec = (await p.getByTestId('recommendation').count()) ? await p.getByTestId('recommendation').innerText() : null;
-    if (!recShown || !rec) issues.push(`${lesson.id}: после урока с ошибками нет рекомендации`);
-    else if ((lesson.language === 'kk') !== KK_LETTERS.test(rec)) issues.push(`${lesson.id}: рекомендация не на языке урока`);
+    const hasPeer = lessons.some((item) => item.id !== lesson.id && item.grade === lesson.grade && item.language === lesson.language);
+    if (!recShown || (hasPeer && !rec)) issues.push(`${lesson.id}: после урока с ошибками нет рекомендации`);
+    else if (!hasPeer && rec) issues.push(`${lesson.id}: рекомендован урок другого класса или языка`);
+    else if (rec && !lessons.some((item) => item.id !== lesson.id && item.grade === lesson.grade && item.language === lesson.language && rec.includes(item.title))) {
+      issues.push(`${lesson.id}: рекомендация не соответствует классу и языку`);
+    }
     await p.waitForFunction(() => { const e = document.querySelector('[data-testid="finished"]'); const r = e?.getBoundingClientRect(); return !!r && r.top < innerHeight && r.bottom > 0; }, null, { timeout: 3000 }).catch(() => issues.push(`${lesson.id}: экран завершения не в видимой области`));
     L.recommendation = rec; L.seconds = +((Date.now() - t0) / 1000).toFixed(1);
     R.lessons.push(L);
@@ -97,8 +101,8 @@ for (const [pname, prof] of Object.entries(profiles)) {
   await p.reload();
   await p.getByTestId('grade-all').click().catch(() => {});
   for (const lesson of lessons) {
-    const txt = await p.getByTestId(`lesson-${lesson.id}`).innerText();
-    if (!/3 из 3|3 тапсырманың 3/.test(txt)) issues.push(`${lesson.id}: после офлайн-перезагрузки прогресс не 3 из 3 (${txt.split('\n').pop()})`);
+    await expect(p.getByTestId(`lesson-${lesson.id}`)).toContainText(/3 из 3|3 тапсырманың 3/)
+      .catch(() => issues.push(`${lesson.id}: после офлайн-перезагрузки прогресс не 3 из 3`));
   }
   R.skills = await p.getByTestId('progress').innerText().then((s) => s.replace(/\s+/g, ' '));
   R.noHScroll = await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth);

@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { hasEnoughReadingText, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
+import { DEFAULT_GRADE, GradeSchema, hasEnoughReadingText, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
 const GenerateBody = z.object({
@@ -11,6 +11,7 @@ const GenerateBody = z.object({
     .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`)
     .refine((t) => splitSentences(t).length <= MAX_SENTENCES, `Слишком много предложений (не больше ${MAX_SENTENCES})`),
   language: z.enum(['kk', 'ru'], { error: 'Язык урока: kk или ru' }),
+  grade: GradeSchema.default(DEFAULT_GRADE),
   title: z.string({ error: 'Название — строка' }).trim().max(120, 'Название слишком длинное (не больше 120 символов)').default(''),
 });
 

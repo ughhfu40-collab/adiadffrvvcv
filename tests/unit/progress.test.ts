@@ -40,6 +40,19 @@ describe('импорт урока с уже существующим ID', () => 
   });
 });
 
+it('новый встроенный ID не перезаписывает ранее импортированный урок и его прогресс', async () => {
+  const d = new AppDB(`upgrade-${Math.random()}`);
+  const builtin = BUILTIN_LESSONS.find((l) => l.id === 'ru-garden')!;
+  const original = { ...builtin, title: 'Прежний урок ученика' };
+  expect((await importLesson(original, d)).status).toBe('new');
+  await d.attempts.add({ lessonId: original.id, taskId: 't1', skill: 'find', optionId: 'b', evidence: ['s1'], answerCorrect: true, evidenceOk: true, solved: true, at: 1 });
+  await seedBuiltins(d);
+  expect(await d.lessons.get(original.id)).toMatchObject({ source: 'imported', lesson: original });
+  expect((await readProgress(d)).solved.has(`${original.id}/t1`)).toBe(true);
+  expect((await importLesson(original, d)).status).toBe('same');
+  await d.delete();
+});
+
 describe('качество новых черновиков не ломает старые уроки', () => {
   it('встроенные уроки валидны по схеме независимо от правил качества', async () => {
     const { validateLesson } = await import('../../shared/lesson');

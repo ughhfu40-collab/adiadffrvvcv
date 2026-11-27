@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from 'react';
-import { MAX_SENTENCES, MAX_TEXT_CHARS, DEFAULT_LESSON_TITLE, qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
+import { DEFAULT_GRADE, DEFAULT_LESSON_TITLE, GRADES, GradeSchema, MAX_SENTENCES, MAX_TEXT_CHARS, qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Grade, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
@@ -28,6 +28,7 @@ export function Teacher() {
   const { t, lang } = useI18n();
   const [text, setText] = useState('');
   const [language, setLanguage] = useState<Language>('ru');
+  const [grade, setGrade] = useState<Grade>(DEFAULT_GRADE);
   const [title, setTitle] = useState('');
   const [health, setHealth] = useState<Health | { error: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,6 +76,7 @@ export function Teacher() {
         setText(source.text);
         setTitle(source.title);
         setLanguage(source.language);
+        setGrade(GradeSchema.safeParse(source.grade).data ?? restored?.grade ?? DEFAULT_GRADE);
         if (restored) loadDraft(restored);
       },
       () => { if (active) setStorageIssue('error'); },
@@ -85,9 +87,10 @@ export function Teacher() {
     if (loadingDraft) return;
     const previous = lastQueued.current;
     if (previous?.draft === draft && previous.source.text === text
-      && previous.source.title === title && previous.source.language === language) return;
-    if (!previous && !draft && !text && !title && language === 'ru') return;
-    const source = { text, title, language };
+      && previous.source.title === title && previous.source.language === language
+      && (previous.source.grade ?? draft?.grade ?? DEFAULT_GRADE) === grade) return;
+    if (!previous && !draft && !text && !title && language === 'ru' && grade === DEFAULT_GRADE) return;
+    const source = { text, title, language, grade };
     lastQueued.current = { source, draft };
     let active = true;
     void persistDraft(source, draft, () => storedRevision.current).then(
@@ -98,7 +101,7 @@ export function Teacher() {
       () => { if (active) setStorageIssue('error'); },
     );
     return () => { active = false; };
-  }, [draft, language, loadingDraft, text, title]);
+  }, [draft, grade, language, loadingDraft, text, title]);
   useEffect(() => {
     if (!busy) return;
     const start = Date.now();
@@ -128,7 +131,7 @@ export function Teacher() {
     abortRef.current = ctrl;
     setBusy(true); setGenMsg(null); setStructErrors([]);
     try {
-      const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title }), signal: ctrl.signal });
+      const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title, grade }), signal: ctrl.signal });
       const body = readGenerateResponse(await r.json());
       ctrl.signal.throwIfAborted();
       if (!body) {
@@ -156,7 +159,7 @@ export function Teacher() {
   }
 
   function manualDraft() {
-    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || DEFAULT_LESSON_TITLE[language], language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
+    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || DEFAULT_LESSON_TITLE[language], language, grade, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
   const updTask = (i: number, patch: Partial<Task>) => updateDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
@@ -239,6 +242,10 @@ export function Teacher() {
           <select className="input" value={language} disabled={loadingDraft} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
             <option value="ru">Русский</option><option value="kk">Қазақша</option>
           </select>
+          <select className="input" aria-label={t('gradeLabel')} value={grade} disabled={loadingDraft}
+            onChange={(e) => setGrade(GradeSchema.parse(Number(e.target.value)))} data-testid="t-grade">
+            {GRADES.map((g) => <option key={g} value={g}>{t('grade', { g })}</option>)}
+          </select>
         </div>
         <textarea className="input h-44 w-full font-serif text-[1.05rem] leading-7" placeholder={t('tPaste')} aria-label={t('tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
         {sentences.length > 0 && (
@@ -303,6 +310,7 @@ export function Teacher() {
                 <ul className="list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
               </div>
             )}
+            <p className="text-sm text-muted" data-testid="t-draft-grade">{t('grade', { g: draft.grade })}</p>
             <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => updateDraft({ ...draft, title: e.target.value })} />
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);

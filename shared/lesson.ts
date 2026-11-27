@@ -33,6 +33,11 @@ z.config({
 export const LanguageSchema = z.enum(['kk', 'ru']);
 export type Language = z.infer<typeof LanguageSchema>;
 
+export const GRADES = [7, 8, 9] as const;
+export const GradeSchema = z.literal(GRADES);
+export type Grade = z.infer<typeof GradeSchema>;
+export const DEFAULT_GRADE: Grade = 8;
+
 export const DEFAULT_LESSON_TITLE: Record<Language, string> = { kk: 'Жаңа сабақ', ru: 'Новый урок' };
 
 export const SkillSchema = z.enum(['find', 'match', 'infer']);
@@ -72,7 +77,7 @@ export const LessonBaseSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   title: NonBlankText,
   language: LanguageSchema,
-  grade: z.number().int().min(7).max(9),
+  grade: GradeSchema,
   sentences: z.array(SentenceSchema).min(2),
   tasks: z.array(TaskSchema).min(1),
 });
@@ -305,7 +310,7 @@ export interface AttemptLike {
   solved: boolean;
 }
 
-/** Навык с наибольшим числом ошибок в уроке → задание того же языка и навыка из другого урока (сначала нерешённые). */
+/** Навык с наибольшим числом ошибок → задание того же класса, языка и навыка из другого урока. */
 export function recommendNext(
   lessons: Lesson[],
   current: Lesson,
@@ -317,7 +322,7 @@ export function recommendNext(
   const ranked = (Object.keys(errors) as Skill[]).filter((s) => errors[s] > 0).sort((a, b) => errors[b] - errors[a]);
   for (const skill of ranked) {
     const candidates = lessons
-      .filter((l) => l.language === current.language && l.id !== current.id)
+      .filter((l) => l.grade === current.grade && l.language === current.language && l.id !== current.id)
       .flatMap((l) => l.tasks.filter((t) => t.skill === skill).map((task) => ({ lesson: l, task, skill })));
     const pick = candidates.find((c) => !solvedKeys.has(`${c.lesson.id}/${c.task.id}`)) ?? candidates[0];
     if (pick) return pick;

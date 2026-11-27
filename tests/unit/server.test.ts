@@ -36,6 +36,23 @@ describe('сервер: проверка черновика модели', () =>
     expect(body.messages[0].content).toContain('s3: Осенью');
     expect(body.format.properties.tasks).toBeTruthy();
   });
+  it('класс попадает в промпт и результат, старым запросам соответствует 8 класс', async () => {
+    const fake = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) =>
+      new Response(JSON.stringify({ message: { content: JSON.stringify(goodTasks) } })));
+    const app = await buildApp({ fetchImpl: fake });
+    try {
+      for (const grade of [7, undefined, 9]) {
+        const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'kk', grade } });
+        expect(res.json()).toMatchObject({ ok: true, lesson: { grade: grade ?? 8 } });
+        const body = JSON.parse(String(fake.mock.calls.at(-1)?.[1]?.body));
+        expect(body.messages[0].content).toContain(`для ${grade ?? 8} класса`);
+      }
+      expect((await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru', grade: 10 } })).statusCode).toBe(400);
+      expect(fake).toHaveBeenCalledTimes(3);
+    } finally {
+      await app.close();
+    }
+  });
   it('503 с причиной и командой запуска, если Ollama недоступна', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
     const app = await buildApp();

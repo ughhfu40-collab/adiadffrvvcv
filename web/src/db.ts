@@ -1,10 +1,10 @@
 import Dexie, { type Table } from 'dexie';
-import type { Language, Lesson, Skill } from '../../shared/lesson';
+import type { Grade, Language, Lesson, Skill } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 
 export interface LessonRow { id: string; lesson: Lesson; source: 'builtin' | 'imported' | 'teacher'; addedAt: number }
 export interface AttemptRow { id?: number; lessonId: string; taskId: string; skill: Skill; optionId: string | null; evidence: string[]; answerCorrect: boolean; evidenceOk: boolean; solved: boolean; at: number }
-export interface DraftSource { text: string; title: string; language: Language }
+export interface DraftSource { text: string; title: string; language: Language; grade?: Grade }
 export interface DraftRow { id: string; data: unknown; updatedAt: number; source?: DraftSource; revision?: string }
 
 export class AppDB extends Dexie {
@@ -37,7 +37,12 @@ export async function persistDraft(
 }
 
 export async function seedBuiltins(d: AppDB = db) {
-  await d.lessons.bulkPut(BUILTIN_LESSONS.map((lesson) => ({ id: lesson.id, lesson, source: 'builtin' as const, addedAt: 0 })));
+  await d.transaction('rw', d.lessons, async () => {
+    const existing = await d.lessons.bulkGet(BUILTIN_LESSONS.map((lesson) => lesson.id));
+    const rows: LessonRow[] = BUILTIN_LESSONS.flatMap((lesson, i) =>
+      !existing[i] || existing[i]?.source === 'builtin' ? [{ id: lesson.id, lesson, source: 'builtin', addedAt: 0 }] : []);
+    await d.lessons.bulkPut(rows);
+  });
 }
 
 export interface SkillStats { attempts: number; solved: number; errors: number }

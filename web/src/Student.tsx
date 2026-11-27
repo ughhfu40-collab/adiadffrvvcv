@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { checkAnswer, feedbackParts, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
+import { checkAnswer, DEFAULT_GRADE, feedbackParts, GRADES, GradeSchema, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Grade, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 import { db, importLesson, readProgress, solvedKeys } from './db';
 import { PITCH_URL, useI18n } from './i18n';
@@ -9,11 +9,12 @@ type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 
 const LANG_NAME: Record<Language, string> = { kk: 'Қазақша', ru: 'Русский' };
 const EMPTY_SOLVED = new Set<string>();
-type GradeFilter = 'all' | 7 | 8 | 9;
-const GRADES: GradeFilter[] = ['all', 7, 8, 9];
+type GradeFilter = Grade | 'all';
+const GRADE_FILTERS = ['all', ...GRADES] as const;
 const GRADE_KEY = 'oqy-grade';
 function readGrade(): GradeFilter {
-  try { const v = localStorage.getItem(GRADE_KEY); return v === '7' || v === '8' || v === '9' ? (Number(v) as GradeFilter) : 'all'; } catch { return 'all'; }
+  try { return GradeSchema.safeParse(Number(localStorage.getItem(GRADE_KEY))).data ?? 'all'; }
+  catch { return 'all'; }
 }
 const firstUnsolved = (l: Lesson, solved: Set<string>) => l.tasks.findIndex((x) => !solved.has(`${l.id}/${x.id}`));
 
@@ -30,18 +31,20 @@ export function Student() {
   const progress = useLiveQuery(() => readProgress().catch(() => null), []);
   const solved = progress?.solved ?? EMPTY_SOLVED;
   const [play, setPlay] = useState<Play | null>(null);
+  const [grade, setGrade] = useState(readGrade);
   const [importOpen, setImportOpen] = useState(false);
   const importId = useId();
-  const [grade, setGradeState] = useState<GradeFilter>(readGrade);
-  const setGrade = (g: GradeFilter) => { setGradeState(g); try { localStorage.setItem(GRADE_KEY, String(g)); } catch { /* приватный режим */ } };
+  const selectGrade = (value: GradeFilter) => {
+    setGrade(value);
+    try { localStorage.setItem(GRADE_KEY, String(value)); } catch { /* Storage can be disabled. */ }
+  };
 
   if (play) return <Player key={play.lesson.id + play.taskIds.join() + (play.startIdx ?? 0)} play={play} all={all} onExit={() => setPlay(null)} onPlay={setPlay} />;
 
-  // Выбранный класс; уроки на языке интерфейса — первыми, внутри — по классу (порядок в группе сохраняется).
-  const inGrade = (l: Lesson) => grade === 'all' || l.grade === grade;
-  const ordered = [...(rows ?? [])].filter((r) => inGrade(r.lesson))
+  // Уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
+  const ordered = (rows ?? []).filter((row) => grade === 'all' || row.lesson.grade === grade)
     .sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang) || a.lesson.grade - b.lesson.grade);
-  const start = progress === undefined ? null : pickStart(all.filter(inGrade), lang, solved);
+  const start = progress === undefined ? null : pickStart(all.filter((lesson) => grade === 'all' || grade === lesson.grade), lang, solved);
   const startPlay = () => start && setPlay({ lesson: start, taskIds: start.tasks.map((x) => x.id) });
 
   return (
@@ -51,6 +54,12 @@ export function Student() {
           <p className="kicker">{t('heroKicker')}</p>
           <h1 id="hero-title" className="mt-3 text-balance font-serif text-[2.15rem] font-semibold leading-[1.08] tracking-tight sm:text-5xl xl:text-[3.6rem]">{t('heroTitle')}</h1>
           <p className="mt-4 max-w-xl text-pretty text-lg leading-relaxed text-muted sm:text-xl">{t('heroSub')}</p>
+          <div role="group" aria-label={t('gradeLabel')} className="mt-5 flex flex-wrap gap-2" data-testid="grade-filter">
+            {GRADE_FILTERS.map((g) => (
+              <button type="button" key={g} aria-pressed={grade === g} data-testid={`grade-${g}`}
+                className={grade === g ? 'btn' : 'btn-ghost'} onClick={() => selectGrade(g)}>{g === 'all' ? t('gradeAll') : t('grade', { g })}</button>
+            ))}
+          </div>
           <div className="mt-7 flex flex-col items-start gap-3">
             <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="start-lesson" disabled={!start} onClick={startPlay}>
               {t('startLesson')} <span aria-hidden="true">→</span>
@@ -65,7 +74,7 @@ export function Student() {
             <a className="link" href={PITCH_URL} target="_blank" rel="noopener noreferrer" data-testid="pitch-link">▶ {t('pitchLink')}</a>
           </p>
         </div>
-        <HeroExample lang={lang} />
+        <HeroExample lang={lang} grade={start?.grade ?? (grade === 'all' ? DEFAULT_GRADE : grade)} />
       </section>
 
       <section aria-labelledby="lessons-title">
@@ -78,17 +87,8 @@ export function Student() {
             <span aria-hidden="true">{importOpen ? '−' : '+'}</span> {t('addLesson')}
           </button>
         </div>
-        {importOpen && <div id={importId} className="mt-4"><ImportBox /></div>}
-        <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label={t('gradeFilter')} data-testid="grade-filter">
-          <span className="text-sm text-muted">{t('gradeFilter')}:</span>
-          {GRADES.map((g) => (
-            <button key={g} type="button" aria-pressed={grade === g} data-testid={`grade-${g}`} onClick={() => setGrade(g)}
-              className={`min-h-11 rounded-full px-4 text-sm ring-1 transition ${grade === g ? 'bg-brand text-on-brand ring-brand' : 'bg-card ring-line hover:bg-brand-soft'}`}>
-              {g === 'all' ? t('gradeAll') : t('grade', { g })}
-            </button>
-          ))}
-        </div>
-        {ordered.length === 0 && rows && <p className="mt-5 text-muted" data-testid="grade-empty">{t('gradeEmpty')}</p>}
+        {importOpen && <div id={importId} className="mt-4"><ImportBox onImported={selectGrade} /></div>}
+        {rows && !ordered.length && <p className="mt-5 text-sm text-muted" data-testid="grade-empty">{t('gradeEmpty')}</p>}
         <ul className="mt-5 grid gap-4 sm:grid-cols-2">
           {ordered.map(({ lesson, source }) => {
             const done = lesson.tasks.filter((x) => solved.has(`${lesson.id}/${x.id}`)).length;
@@ -140,9 +140,13 @@ export function Student() {
 }
 
 /** Фрагмент настоящего встроенного урока: предложение-доказательство выделено маркером (только на широком экране). */
-function HeroExample({ lang }: { lang: Language }) {
+function HeroExample({ lang, grade }: { lang: Language; grade: Grade }) {
   const { t } = useI18n();
-  const lesson = BUILTIN_LESSONS.find((l) => l.id === (lang === 'kk' ? 'kk-balkhash' : 'ru-saiga')) ?? BUILTIN_LESSONS[0]!;
+  const preferred = lang === 'kk' ? 'kk-balkhash' : 'ru-saiga';
+  const lesson = grade === DEFAULT_GRADE
+    ? BUILTIN_LESSONS.find((item) => item.id === preferred)
+    : BUILTIN_LESSONS.find((item) => item.grade === grade && item.language === lang);
+  if (!lesson) return null;
   const task = lesson.tasks[0]!;
   const ev = task.evidenceSets[0]?.[0];
   const at = Math.max(0, lesson.sentences.findIndex((s) => s.id === ev));
@@ -176,7 +180,7 @@ function HeroExample({ lang }: { lang: Language }) {
   );
 }
 
-function ImportBox() {
+function ImportBox({ onImported }: { onImported: (grade: Grade) => void }) {
   const { t } = useI18n();
   const [errors, setErrors] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'same' | 'renamed'; text: string } | null>(null);
@@ -194,6 +198,7 @@ function ImportBox() {
         return;
       }
       const out = await importLesson(r.lesson);
+      onImported(out.lesson.grade);
       if (out.status === 'new') setMsg({ kind: 'ok', text: t('importOk', { title: out.lesson.title }) });
       else if (out.status === 'same') setMsg({ kind: 'same', text: t('importSame', { title: out.lesson.title }) });
       else setMsg({ kind: 'renamed', text: t('importConflict', { id: out.originalId, title: out.lesson.title, newId: out.lesson.id }) });

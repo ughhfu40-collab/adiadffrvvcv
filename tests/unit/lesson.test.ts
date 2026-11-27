@@ -29,19 +29,14 @@ it('десятичная точка не разбивает предложени
 });
 
 describe('встроенные уроки', () => {
-  it('8 уроков для 7–9 классов: в каждом классе есть казахский и русский, по 3 задания на все навыки', () => {
+  it('8 уроков, на обоих языках для каждого класса, по 3 задания', () => {
     expect(BUILTIN_LESSONS).toHaveLength(8);
-    for (const g of [7, 8, 9]) for (const lang of ['kk', 'ru']) {
-      expect(BUILTIN_LESSONS.some((l) => l.grade === g && l.language === lang), `${g} ${lang}`).toBe(true);
+    for (const grade of [7, 8, 9]) {
+      for (const language of ['kk', 'ru']) {
+        expect(BUILTIN_LESSONS.filter((l) => l.grade === grade && l.language === language)).toHaveLength(grade === 8 ? 2 : 1);
+      }
     }
     for (const l of BUILTIN_LESSONS) expect(l.tasks.map((t) => t.skill)).toEqual(['find', 'match', 'infer']);
-  });
-  it('во встроенных уроках сопоставление не засчитывается по одному предложению из набора', () => {
-    for (const l of BUILTIN_LESSONS) {
-      const m = l.tasks.find((t) => t.skill === 'match')!;
-      for (const sid of m.evidenceSets[0]!) expect(checkAnswer(m, m.correctOptionId, [sid]).solved, `${l.id} ${sid}`).toBe(false);
-      for (const set of m.evidenceSets) expect(checkAnswer(m, m.correctOptionId, set).solved, `${l.id} ${set}`).toBe(true);
-    }
   });
   it('в заданиях на сопоставление одно предложение не засчитывается', () => {
     for (const lesson of BUILTIN_LESSONS) {
@@ -53,6 +48,14 @@ describe('встроенные уроки', () => {
       }
     }
   });
+});
+
+it('дополнительное задание соответствует классу и языку текущего урока', () => {
+  const current = BUILTIN_LESSONS.find((l) => l.id === 'ru-garden')!;
+  const attempt = { lessonId: current.id, taskId: 't1', skill: 'find' as const, solved: false };
+  expect(recommendNext(BUILTIN_LESSONS, current, [attempt], new Set())).toBeNull();
+  const added = { ...current, id: 'ru-extra7' };
+  expect(recommendNext([...BUILTIN_LESSONS, added], current, [attempt], new Set())?.lesson.id).toBe(added.id);
 });
 
 describe('проверка ответа и доказательства отдельно', () => {

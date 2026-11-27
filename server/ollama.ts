@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_LESSON_TITLE, qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
+import { DEFAULT_GRADE, DEFAULT_LESSON_TITLE, qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Grade, type Lesson } from '../shared/lesson';
 
 export const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'gemma3:12b';
@@ -68,11 +68,18 @@ const MATCH_EXAMPLE: Record<Language, { sentences: string[]; task: object; bad: 
   },
 };
 
-export function buildPrompt(language: Language, sentences: { id: string; text: string }[]): string {
+const GRADE_GUIDANCE: Record<Grade, string> = {
+  7: 'Пиши короткие вопросы и варианты знакомыми словами. Вывод должен следовать из двух конкретных деталей в понятной ситуации.',
+  8: 'Сопоставляй детали из разных частей текста. Для вывода предложи связать причину с наблюдаемым результатом.',
+  9: 'Если текст позволяет, предложи сопоставить разные условия, данные или точки зрения. В выводе проверь, где заканчиваются данные текста и начинается необоснованное обобщение.',
+};
+
+export function buildPrompt(language: Language, sentences: { id: string; text: string }[], grade: Grade = DEFAULT_GRADE): string {
   const langName = language === 'kk' ? 'казахском (қазақ тілі)' : 'русском';
   const ex = MATCH_EXAMPLE[language];
   return [
-    `Ты методист по читательской грамотности для 8 класса. Составь ровно 3 задания на ${langName} языке по тексту ниже — по одному каждого типа.`,
+    `Ты методист по читательской грамотности для ${grade} класса. Составь ровно 3 задания на ${langName} языке по тексту ниже — по одному каждого типа.`,
+    GRADE_GUIDANCE[grade],
     'Задание t1: skill="find" — найти факт, прямо названный в ОДНОМ предложении. evidenceSets — одно предложение.',
     'Задание t2: skill="match" — сопоставить детали из ДВУХ РАЗНЫХ предложений. Ответ должен получаться только из их связи: ни одно предложение по отдельности не содержит полного ответа. Вопрос не должен содержать ответ или подсказывать его.',
     `Самопроверка для t2: ${ex.check} Если ответ целиком есть в одном предложении — перепиши вопрос так, чтобы он спрашивал о связи двух фактов (что было тогда / что изменилось / кто и когда).`,
@@ -121,12 +128,12 @@ export type GenerateResult =
   | { ok: false; kind: 'quality'; errors: string[]; issues: QualityIssue[]; draft: Lesson };
 
 /** Собирает урок из ответа модели и проверяет общей схемой (ID предложений, ссылки на варианты). */
-export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language }, sentences: { id: string; text: string }[]): GenerateResult {
+export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language; grade?: Grade }, sentences: { id: string; text: string }[]): GenerateResult {
   const parsed = DraftSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, kind: 'structure', errors: ['Модель вернула черновик неверной структуры', ...formatIssues(parsed.error)] };
   }
-  const candidate = { ...meta, grade: 8, sentences, tasks: parsed.data.tasks };
+  const candidate = { ...meta, grade: meta.grade ?? DEFAULT_GRADE, sentences, tasks: parsed.data.tasks };
   const base = LessonBaseSchema.safeParse(candidate);
   if (!base.success) return { ok: false, kind: 'structure', errors: ['Черновик не соответствует схеме урока', ...formatIssues(base.error)] };
   const full = LessonSchema.safeParse(candidate);
@@ -135,8 +142,9 @@ export function assembleDraft(raw: unknown, meta: { id: string; title: string; l
   return issues.length ? { ok: false, kind: 'quality', issues, errors: issues.map((q) => qualityIssueText(meta.language, q)), draft: full.data } : { ok: true, lesson: full.data };
 }
 
-export async function generateLesson(input: { text: string; language: Language; title: string }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
+export async function generateLesson(input: { text: string; language: Language; title: string; grade?: Grade }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
   const sentences = splitSentences(input.text);
+  const grade = input.grade ?? DEFAULT_GRADE;
   const signal = cancel ? AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   let body: unknown;
   try {
@@ -148,7 +156,7 @@ export async function generateLesson(input: { text: string; language: Language; 
         stream: false,
         format: DRAFT_JSON_SCHEMA,
         options: { temperature: 0.2 },
-        messages: [{ role: 'user', content: buildPrompt(input.language, sentences) }],
+        messages: [{ role: 'user', content: buildPrompt(input.language, sentences, grade) }],
       }),
       signal,
     });
@@ -171,5 +179,5 @@ export async function generateLesson(input: { text: string; language: Language; 
   }
   // Время + случайный суффикс: параллельные запросы в одну миллисекунду получают разные ID.
   const slug = `gen-${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  return assembleDraft(raw, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language }, sentences);
+  return assembleDraft(raw, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language, grade }, sentences);
 }
