@@ -7,13 +7,15 @@ const buildSha = process.env.VITE_BUILD_SHA ?? process.env.GITHUB_SHA ?? (() => 
 process.env.VITE_BUILD_SHA = buildSha;
 
 const apiTarget = process.env.API_TARGET ?? 'http://127.0.0.1:8787';
+// Vite меняет Host для строковой настройки прокси. API сверяет Origin с исходным Host.
+const apiProxy = { '/api': { target: apiTarget, changeOrigin: false } };
 
 export default defineConfig({
   root: 'web',
   base: process.env.BASE_PATH ?? './',
   build: { outDir: '../dist', emptyOutDir: true },
-  server: { proxy: { '/api': apiTarget } },
-  preview: { proxy: { '/api': apiTarget } },
+  server: { proxy: apiProxy },
+  preview: { proxy: apiProxy },
   plugins: [
     react(),
     {
