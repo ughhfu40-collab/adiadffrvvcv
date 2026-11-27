@@ -2,7 +2,8 @@
 // Решение всегда за учителем: замечания ИИ не блокируют сохранение, исправление проходит ту же автоматическую проверку.
 import { z } from 'zod';
 import { answerOverlap, LessonSchema, qualityIssues, qualityIssueText, TaskSchema, formatIssues, type Language, type Lesson, type Task } from '../shared/lesson';
-import { callModelJson, TIMEOUT_MS } from './ollama';
+import { subjectOf } from '../shared/math';
+import { callModelJson, MATH_DRAFT_JSON_SCHEMA, TIMEOUT_MS } from './ollama';
 
 export interface TaskReview {
   taskId: string;
@@ -102,6 +103,8 @@ const MSG = {
     one: (sid: string) => `Ответ выбирается по одному предложению ${sid} — второе предложение в доказательстве не нужно.`,
     lang: (f: string, fix: string) => `Язык: «${f}»${fix ? ` → «${fix}»` : ''}.`,
     skipped: 'ИИ не проверил это задание',
+    partialOptions: 'ИИ не проверил все варианты ответа. Запустите проверку ещё раз.',
+    partialEvidence: 'ИИ не проверил все доказательства. Запустите проверку ещё раз.',
   },
   kk: {
     answer: (o: string) => `${o} дұрыс нұсқасы мәтінмен толық расталмайды — артық немесе бұрмаланған сөз жоқ па, тексеріңіз.`,
@@ -109,6 +112,8 @@ const MSG = {
     one: (sid: string) => `Жауапты бір ғана ${sid} сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.`,
     lang: (f: string, fix: string) => `Тіл: «${f}»${fix ? ` → «${fix}»` : ''}.`,
     skipped: 'ЖИ бұл тапсырманы тексермеді',
+    partialOptions: 'ЖИ барлық жауап нұсқаларын тексермеді. Тексеруді қайта іске қосыңыз.',
+    partialEvidence: 'ЖИ барлық дәлелдерді тексермеді. Тексеруді қайта іске қосыңыз.',
   },
 } as const;
 
@@ -143,6 +148,14 @@ export async function reviewLesson(lesson: Lesson, fetchImpl: typeof fetch = fet
     if (!probe) return { taskId: t.id, answerFromText: false, onlyOneCorrect: false, evidenceOk: false, languageOk: false, problems: [m.skipped], ok: false };
     const verdict = new Map(probe.options.map((o) => [o.id, o]));
     const problems: string[] = [];
+    const optionsComplete = t.options.every((o) => verdict.has(o.id)) && verdict.size === probe.options.length;
+    const expectedProbes = probes.filter((p) => p.task.id === t.id);
+    const evidenceComplete = expectedProbes.every((p) => {
+      const answer = ablation.get(p.key);
+      return answer === 'none' || t.options.some((o) => o.id.toLowerCase() === answer);
+    });
+    if (!optionsComplete) problems.push(m.partialOptions);
+    if (!evidenceComplete) problems.push(m.partialEvidence);
     const answerFromText = verdict.get(t.correctOptionId)?.verdict === 'supported';
     if (!answerFromText) problems.push(m.answer(t.correctOptionId));
     const extra = t.options.filter((o) => o.id !== t.correctOptionId && verdict.get(o.id)?.verdict === 'supported');
@@ -152,11 +165,11 @@ export async function reviewLesson(lesson: Lesson, fetchImpl: typeof fetch = fet
     const correctText = t.options.find((o) => o.id === t.correctOptionId)?.text ?? '';
     const sentenceText = new Map(lesson.sentences.map((x) => [x.id, x.text]));
     const solvableAlone = t.skill === 'find' ? [] : (t.evidenceSets[0] ?? []).filter((sid) =>
-      ablation.get(`${t.id}:${sid}`) === t.correctOptionId && answerOverlap(correctText, sentenceText.get(sid) ?? '') >= ONE_SENTENCE_OVERLAP);
+      ablation.get(`${t.id}:${sid}`) === t.correctOptionId.toLowerCase() && answerOverlap(correctText, sentenceText.get(sid) ?? '') >= ONE_SENTENCE_OVERLAP);
     for (const sid of solvableAlone) problems.push(m.one(sid));
     const langErrors = lang.data.errors.filter((e) => e.taskId === t.id && e.fragment.trim());
     for (const e of langErrors) problems.push(m.lang(e.fragment.trim(), e.fix.trim()));
-    const r = { taskId: t.id, answerFromText, onlyOneCorrect: extra.length === 0, evidenceOk: solvableAlone.length === 0, languageOk: langErrors.length === 0, problems };
+    const r = { taskId: t.id, answerFromText, onlyOneCorrect: optionsComplete && answerFromText && extra.length === 0, evidenceOk: evidenceComplete && solvableAlone.length === 0, languageOk: langErrors.length === 0, problems };
     return { ...r, ok: problems.length === 0 };
   });
   return { ok: true, review };
@@ -177,10 +190,13 @@ export const REPAIR_JSON_SCHEMA = {
 } as const;
 
 export function buildRepairPrompt(lesson: Lesson, task: Task, problems: string[]): string {
+  const math = subjectOf(lesson) === 'math';
   return [
-    `Исправь ОДНО задание по читательской грамотности (${lesson.grade} класс) на ${langName(lesson.language)} языке.`,
-    `Сохрани id "${task.id}" и тип skill="${task.skill}" (${SKILL_NAME[task.skill]}). Три варианта с id "a","b","c", ровно один верный.`,
-    'Верный вариант должен полностью следовать из текста, без добавленных фактов; бери слова из текста без замен. Неверные варианты должны явно противоречить тексту.',
+    `Исправь ОДНО задание по ${math ? 'математической' : 'читательской'} грамотности (${lesson.grade} класс) на ${langName(lesson.language)} языке.`,
+    `Сохрани id "${task.id}" и тип skill="${task.skill}"${math ? '' : ` (${SKILL_NAME[task.skill]})`}. Три варианта с id "a","b","c", ровно один верный.`,
+    math
+      ? 'Не добавляй исходных данных. Пересчитай ответ. В solution объясни расчёт с единицами, а в calc запиши формулу из чисел условия: value с expr для числа или choose с pick и values для сравниваемых вариантов. Используй + - * / и скобки.'
+      : 'Верный вариант должен полностью следовать из текста, без добавленных фактов; бери слова из текста без замен. Неверные варианты должны явно противоречить тексту.',
     task.skill === 'find'
       ? 'evidenceSets — одно предложение, где факт назван прямо.'
       : 'evidenceSets — минимум два разных предложения в каждом наборе, и ответ нельзя получить ни из одного предложения по отдельности. Вопрос не должен подсказывать ответ.',
@@ -204,10 +220,16 @@ export async function repairTask(lesson: Lesson, taskId: string, problems: strin
   const index = lesson.tasks.findIndex((t) => t.id === taskId);
   const current = lesson.tasks[index];
   if (!current) return { ok: false, kind: 'references', errors: [`Задание ${taskId} не найдено`] };
-  const r = await callModelJson(buildRepairPrompt(lesson, current, problems), REPAIR_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
+  const math = subjectOf(lesson) === 'math';
+  const r = await callModelJson(buildRepairPrompt(lesson, current, problems), math ? MATH_DRAFT_JSON_SCHEMA.properties.tasks.items : REPAIR_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
   if (!r.ok) return r;
   const parsed = TaskSchema.safeParse(r.data);
   if (!parsed.success) return { ok: false, kind: 'structure', errors: ['Исправление ИИ неверной структуры', ...formatIssues(parsed.error)] };
+  if (math && (!parsed.data.solution?.trim() || !parsed.data.calc)) {
+    return { ok: false, kind: 'structure', errors: [lesson.language === 'kk'
+      ? 'Түзетілген тапсырмада есептің түсіндірмесі мен тексеру формуласы болуы керек.'
+      : 'В исправленном задании должны быть объяснение расчёта и формула проверки.'] };
+  }
   // id и тип задания — от учителя, не от модели.
   const task: Task = { ...parsed.data, id: current.id, skill: current.skill };
   const next = { ...lesson, tasks: lesson.tasks.map((t, i) => (i === index ? task : t)) };

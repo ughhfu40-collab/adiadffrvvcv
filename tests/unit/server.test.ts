@@ -302,6 +302,21 @@ describe('вторая проверка ИИ и исправление зада�
     const r = await reviewLesson(lesson, routed({ skipTask: 't3' }));
     if (r.ok) expect(r.review.map((x) => x.ok)).toEqual([true, true, false]);
   });
+  it('неполные ответы модели не подтверждают уникальность ответа и достаточность доказательства', async () => {
+    const fake = async (_u: string | URL | Request, init?: RequestInit) => {
+      const format = JSON.parse(String(init?.body)).format.properties;
+      const partial = format.tasks
+        ? { tasks: lesson.tasks.map((t) => ({ id: t.id, options: [{ id: t.correctOptionId, verdict: 'supported', sentenceIds: [] }] })) }
+        : format.probes ? { probes: [] } : { errors: [] };
+      return respond(partial)('http://localhost');
+    };
+    const result = await reviewLesson(lesson, fake);
+    expect(result).toMatchObject({ ok: true, review: [
+      { ok: false, onlyOneCorrect: false },
+      { ok: false, onlyOneCorrect: false, evidenceOk: false },
+      { ok: false, onlyOneCorrect: false, evidenceOk: false },
+    ] });
+  });
   it('исправление сохраняет id и тип, ссылки и правила качества проверяются', async () => {
     const base = { question: 'Q', options: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }, { id: 'c', text: 'z' }], correctOptionId: 'a', hint: 'h' };
     const good = await repairTask(lesson, 't2', ['p'], respond({ ...base, id: 'zzz', skill: 'find', evidenceSets: [['s4', 's5']] }));
@@ -309,6 +324,19 @@ describe('вторая проверка ИИ и исправление зада�
     expect(await repairTask(lesson, 't2', [], respond({ ...base, id: 't2', skill: 'match', evidenceSets: [['s99', 's1']] }))).toMatchObject({ ok: false, kind: 'references' });
     expect(await repairTask(lesson, 't2', [], respond({ ...base, id: 't2', skill: 'match', evidenceSets: [['s4']] }))).toMatchObject({ ok: false, kind: 'quality' });
     expect(await repairTask(lesson, 't9', [], respond({}))).toMatchObject({ ok: false, kind: 'references' });
+  });
+  it('исправление математики сохраняет расчёт и отклоняет неверную формулу', async () => {
+    const math = BL.find((l) => l.id === 'math-ru-7-trip')!;
+    const original = math.tasks[1]!;
+    const { solution: _solution, calc: _calc, ...readingOnly } = original;
+    expect(await repairTask(math, original.id, [], respond(readingOnly))).toMatchObject({ ok: false, kind: 'structure' });
+    const fake = vi.fn(async (_u: string | URL | Request, _init?: RequestInit) => respond(original)('http://localhost'));
+    expect(await repairTask(math, original.id, [], fake)).toMatchObject({ ok: true, task: { calc: original.calc, solution: original.solution } });
+    const request = JSON.parse(String(fake.mock.calls[0]?.[1]?.body));
+    expect(request.format.required).toEqual(expect.arrayContaining(['calc', 'solution']));
+    expect(request.messages[0].content).toContain('математической грамотности');
+    const wrong = { ...original, calc: { kind: 'value', expr: '1+1', unit: '₸' } };
+    expect(await repairTask(math, original.id, [], respond(wrong))).toMatchObject({ ok: false, kind: 'quality' });
   });
   it('/api/review и /api/repair: неверный урок — 400 без вызова модели; таймаут — 504', async () => {
     const spy = vi.fn();
