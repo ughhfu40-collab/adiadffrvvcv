@@ -40,3 +40,30 @@ export async function solvedKeys(d: AppDB = db): Promise<Set<string>> {
   const rows = await d.attempts.filter((a) => a.solved).toArray();
   return new Set(rows.map((a) => `${a.lessonId}/${a.taskId}`));
 }
+
+export type ImportOutcome =
+  | { status: 'new'; lesson: Lesson }
+  | { status: 'same'; lesson: Lesson }
+  | { status: 'renamed'; lesson: Lesson; originalId: string };
+
+const stable = (v: unknown): string => JSON.stringify(v, (_k, x: unknown) =>
+  x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : x);
+
+/** Импорт без потерь: существующий урок (и прогресс по его ID) никогда не перезаписывается. */
+export async function importLesson(lesson: Lesson, d: AppDB = db): Promise<ImportOutcome> {
+  const existing = await d.lessons.get(lesson.id);
+  if (!existing) {
+    await d.lessons.put({ id: lesson.id, lesson, source: 'imported', addedAt: Date.now() });
+    return { status: 'new', lesson };
+  }
+  if (stable(existing.lesson) === stable(lesson)) return { status: 'same', lesson: existing.lesson };
+  let n = 2;
+  while (await d.lessons.get(`${lesson.id}-v${n}`)) {
+    const other = (await d.lessons.get(`${lesson.id}-v${n}`))!.lesson;
+    if (stable({ ...other, id: lesson.id, title: lesson.title }) === stable(lesson)) return { status: 'same', lesson: other };
+    n++;
+  }
+  const copy: Lesson = { ...lesson, id: `${lesson.id}-v${n}`, title: `${lesson.title} (v${n})` };
+  await d.lessons.put({ id: copy.id, lesson: copy, source: 'imported', addedAt: Date.now() });
+  return { status: 'renamed', lesson: copy, originalId: lesson.id };
+}

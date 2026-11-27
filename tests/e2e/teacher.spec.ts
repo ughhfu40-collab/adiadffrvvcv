@@ -23,6 +23,11 @@ async function exportJson(page: Page) {
   return JSON.parse(text as string) as { sentences: { id: string }[]; tasks: { evidenceSets: string[][] }[] };
 }
 
+async function evidenceText(page: Page, i: number, value: string) {
+  await page.getByTestId(`t-ev-${i}`).locator('summary').click();
+  await page.getByTestId(`t-evidence-${i}`).fill(value);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const orig = URL.createObjectURL.bind(URL);
@@ -33,7 +38,13 @@ test.beforeEach(async ({ page }) => {
   });
   await page.goto('/');
   await page.getByTestId('mode-teacher').click();
-  await expect(page.getByTestId('t-health')).toContainText('Ollama готова');
+  await expect(page.getByTestId('t-health')).toContainText('Ollama готова · модель fake');
+});
+
+test('e2e работает только с поддельной моделью, а не с настоящей Ollama', async ({ page }) => {
+  const health = await (await page.request.get('/api/health')).json();
+  expect(health.ollama).toMatchObject({ ok: true, model: 'fake', url: 'http://127.0.0.1:11535' });
+  expect(health.timeoutSec).toBe(5);
 });
 
 test('два черновика подряд: поле доказательств и экспорт показывают второй', async ({ page }) => {
@@ -56,7 +67,9 @@ test('два черновика подряд: поле доказательст�
 for (const marker of ['МАРКЕР-TASKS', 'МАРКЕР-OPTIONS']) {
   test(`неверная структура (${marker}): ошибка и сохранённый предыдущий черновик`, async ({ page }) => {
     await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
-    await page.getByTestId('t-evidence-0').fill('s2');
+    await page.getByTestId('t-ev-0-s2').click();
+    await page.getByTestId('t-ev-0-s3').click();
+    await expect(page.getByTestId('t-evidence-0')).toHaveValue('s2');
     await generate(page, `${marker} первое. Второе. Третье.`);
     await expect(page.getByTestId('t-struct-error')).toContainText('неверную структуру');
     await expect(page.getByTestId('t-struct-error')).toContainText('Предыдущий черновик сохранён');
@@ -70,9 +83,68 @@ test('ошибка только в ID: черновик открывается, 
   await expect(page.getByTestId('t-draft')).toContainText('исправьте поля');
   await expect(page.getByTestId('t-errors')).toContainText('s99');
   await expect(page.getByTestId('t-export')).toBeDisabled();
-  await page.getByTestId('t-evidence-0').fill('s1');
-  await page.getByTestId('t-draft').locator('fieldset').nth(1).locator('input[type=radio]').first().check();
+  await evidenceText(page, 0, 's1');
+  await page.getByTestId('t-task-1').locator('input[type=radio]').first().check();
   await expect(page.getByTestId('t-errors')).toHaveCount(0);
   const json = await exportJson(page);
   expect(json.tasks[0]!.evidenceSets).toEqual([['s1']]);
+});
+
+test('сопоставление на одном предложении: задание подсвечено, учитель добавляет второе нажатием', async ({ page }) => {
+  await generate(page, 'МАРКЕР-QUALITY первое. Второе предложение. Третье предложение.');
+  await expect(page.getByTestId('t-quality')).toContainText('минимум два разных предложения');
+  await expect(page.getByTestId('t-task-1')).toHaveAttribute('data-issue', 'true');
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+  await page.getByTestId('t-ev-1-s3').click();
+  await expect(page.getByTestId('t-ev-1-s3')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('t-quality')).toHaveCount(0);
+  await expect(page.getByTestId('t-task-1')).toHaveAttribute('data-issue', 'false');
+  expect((await exportJson(page)).tasks[1]!.evidenceSets).toEqual([['s2', 's3']]);
+});
+
+test('несколько допустимых наборов доказательств задаются нажатиями', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение. Четвёртое предложение.');
+  await page.getByTestId('t-ev-1-add').click();
+  await page.getByTestId('t-ev-1-s2').click();
+  await page.getByTestId('t-ev-1-s3').click();
+  await expect(page.getByTestId('t-ev-1-set-1')).toContainText('s2, s3');
+  await page.getByTestId('t-ev-1-set-0').click();
+  await expect(page.getByTestId('t-ev-1-s1')).toHaveAttribute('aria-pressed', 'true');
+  expect((await exportJson(page)).tasks[1]!.evidenceSets).toEqual([['s1', 's4'], ['s2', 's3']]);
+  await page.getByTestId('t-ev-1-del-0').click();
+  expect((await exportJson(page)).tasks[1]!.evidenceSets).toEqual([['s2', 's3']]);
+});
+
+test('отмена генерации: виден таймер, черновик и правки сохраняются', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  await page.getByTestId('t-ev-0-s2').click();
+  await page.getByTestId('t-text').fill('МАРКЕР-SLOW первое. Второе предложение. Третье предложение.');
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-elapsed')).toContainText(/0:0[1-9]/);
+  await page.getByTestId('t-cancel').click();
+  await expect(page.getByTestId('t-msg-cancelled')).toBeVisible();
+  await expect(page.getByTestId('t-evidence-0')).toHaveValue('s2,s3');
+  expect((await exportJson(page)).tasks[0]!.evidenceSets).toEqual([['s2', 's3']]);
+});
+
+test('таймаут: отдельное сообщение, черновик сохраняется', async ({ page }) => {
+  test.setTimeout(30_000);
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  await page.getByTestId('t-ev-0-s1').click();
+  await page.getByTestId('t-text').fill('МАРКЕР-SLOW первое. Второе предложение. Третье предложение.');
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-msg-timeout')).toContainText('5 с', { timeout: 15_000 });
+  await expect(page.getByTestId('t-evidence-0')).toHaveValue('s1,s3');
+});
+
+test('интерфейс переключается на қазақша и запоминает выбор', async ({ page }) => {
+  await page.getByTestId('ui-lang').click();
+  await expect(page.getByTestId('t-generate')).toHaveText('Жоба жасау (Ollama)');
+  await expect(page.getByTestId('mode-student')).toHaveText('Оқушы');
+  await page.reload();
+  await expect(page.getByTestId('mode-teacher')).toHaveText('Мұғалім');
+  await page.getByTestId('mode-student').click();
+  await expect(page.getByText('Дағдылар бойынша прогресс')).toBeVisible();
+  await page.getByTestId('ui-lang').click();
+  await expect(page.getByText('Прогресс по навыкам')).toBeVisible();
 });

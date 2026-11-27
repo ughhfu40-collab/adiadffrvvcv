@@ -61,3 +61,20 @@ test('импорт: сломанный JSON отклоняется, коррек
   await expect(page.getByTestId('lesson-imp-test')).toBeVisible();
 });
 
+
+test('импорт урока с существующим ID: старый урок и прогресс сохраняются', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'b', ['s1']);
+  await page.getByText('← К урокам').click();
+  await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
+  const original = (await import('../../lessons/ru-saiga.json', { with: { type: 'json' } })).default;
+  await page.getByTestId('import-file').setInputFiles({ name: 'same.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(original)) });
+  await expect(page.getByTestId('import-same')).toContainText('уже есть');
+  const changed = { ...original, title: 'Сайгаки (новая версия)' };
+  await page.getByTestId('import-file').setInputFiles({ name: 'changed.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(changed)) });
+  await expect(page.getByTestId('import-renamed')).toContainText('ru-saiga-v2');
+  await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Возвращение сайгаков');
+  await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
+  await expect(page.getByTestId('lesson-ru-saiga-v2')).toContainText('Выполнено 0 из 3');
+});

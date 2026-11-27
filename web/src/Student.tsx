@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { checkAnswer, feedbackText, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Lesson, type Skill, type Task } from '../../shared/lesson';
-import { db, skillProgress, solvedKeys } from './db';
+import { db, importLesson, skillProgress, solvedKeys } from './db';
+import { useI18n } from './i18n';
 
 type Play = { lesson: Lesson; taskIds: string[] };
 
 export function Student() {
+  const { t, lang } = useI18n();
   const rows = useLiveQuery(() => db.lessons.toArray(), []) ?? [];
   const progress = useLiveQuery(() => skillProgress(), []);
   const solved = useLiveQuery(() => solvedKeys(), []) ?? new Set<string>();
@@ -16,19 +18,19 @@ export function Student() {
   return (
     <div className="space-y-6">
       <section className="card">
-        <h2 className="h2">Прогресс по навыкам</h2>
+        <h2 className="h2">{t('progressTitle')}</h2>
         <div className="grid gap-3 sm:grid-cols-3" data-testid="progress">
           {(['find', 'match', 'infer'] as Skill[]).map((s) => (
             <div key={s} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800" data-testid={`progress-${s}`}>
-              <div className="text-sm text-slate-500 dark:text-slate-400">{SKILL_LABELS.ru[s]}</div>
-              <div className="text-2xl font-semibold">{progress?.[s].solved ?? 0}<span className="text-base font-normal text-slate-500"> решено</span></div>
-              <div className="text-xs text-slate-500">ошибок: {progress?.[s].errors ?? 0} · попыток: {progress?.[s].attempts ?? 0}</div>
+              <div className="text-sm text-slate-500 dark:text-slate-400">{SKILL_LABELS[lang][s]}</div>
+              <div className="text-2xl font-semibold">{progress?.[s].solved ?? 0}<span className="text-base font-normal text-slate-500"> {t('solved')}</span></div>
+              <div className="text-xs text-slate-500">{t('errorsAttempts', { e: progress?.[s].errors ?? 0, a: progress?.[s].attempts ?? 0 })}</div>
             </div>
           ))}
         </div>
       </section>
       <section>
-        <h2 className="h2">Уроки</h2>
+        <h2 className="h2">{t('lessons')}</h2>
         <ul className="grid gap-3 sm:grid-cols-2">
           {rows.map(({ lesson, source }) => {
             const done = lesson.tasks.filter((t) => solved.has(`${lesson.id}/${t.id}`)).length;
@@ -37,11 +39,11 @@ export function Student() {
                 <button className="card w-full text-left hover:ring-2 hover:ring-indigo-400" data-testid={`lesson-${lesson.id}`} onClick={() => setPlay({ lesson, taskIds: lesson.tasks.map((t) => t.id) })}>
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
                     <span className="badge">{lesson.language === 'kk' ? 'Қазақша' : 'Русский'}</span>
-                    <span>{lesson.grade} класс</span>
-                    {source !== 'builtin' && <span className="badge">импорт</span>}
+                    <span>{t('grade', { g: lesson.grade })}</span>
+                    {source !== 'builtin' && <span className="badge">{t('imported')}</span>}
                   </div>
                   <div className="mt-1 text-lg font-semibold">{lesson.title}</div>
-                  <div className="text-sm text-slate-500">Выполнено {done} из {lesson.tasks.length}</div>
+                  <div className="text-sm text-slate-500">{t('doneOf', { d: done, n: lesson.tasks.length })}</div>
                 </button>
               </li>
             );
@@ -54,25 +56,31 @@ export function Student() {
 }
 
 function ImportBox() {
+  const { t } = useI18n();
   const [errors, setErrors] = useState<string[]>([]);
-  const [okMsg, setOk] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'same' | 'renamed'; text: string } | null>(null);
   async function handle(raw: string) {
-    setOk('');
+    setMsg(null);
     const r = parseLessonJson(raw);
     if (!r.ok) return setErrors(r.errors);
     setErrors([]);
-    await db.lessons.put({ id: r.lesson.id, lesson: r.lesson, source: 'imported', addedAt: Date.now() });
-    setOk(`Урок «${r.lesson.title}» импортирован`);
+    const out = await importLesson(r.lesson);
+    if (out.status === 'new') setMsg({ kind: 'ok', text: t('importOk', { title: out.lesson.title }) });
+    else if (out.status === 'same') setMsg({ kind: 'same', text: t('importSame', { title: out.lesson.title }) });
+    else setMsg({ kind: 'renamed', text: t('importConflict', { id: out.originalId, title: out.lesson.title, newId: out.lesson.id }) });
   }
   return (
     <section className="card">
-      <h2 className="h2">Импорт урока (JSON)</h2>
+      <h2 className="h2">{t('importTitle')}</h2>
       <input type="file" accept="application/json,.json" data-testid="import-file" className="block text-sm"
         onChange={async (e) => { const f = e.target.files?.[0]; if (f) await handle(await f.text()); e.target.value = ''; }} />
-      {okMsg && <p className="mt-2 text-emerald-700 dark:text-emerald-400" data-testid="import-ok">{okMsg}</p>}
+      {msg && (
+        <p role="status" data-testid={msg.kind === 'ok' ? 'import-ok' : `import-${msg.kind}`}
+          className={`mt-2 ${msg.kind === 'ok' ? 'text-emerald-700 dark:text-emerald-400' : 'rounded-lg bg-sky-50 p-3 text-sm text-sky-900 dark:bg-sky-950 dark:text-sky-100'}`}>{msg.text}</p>
+      )}
       {errors.length > 0 && (
         <div className="mt-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200" data-testid="import-errors" role="alert">
-          <b>Урок не импортирован:</b>
+          <b>{t('importFailed')}</b>
           <ul className="list-disc pl-5">{errors.slice(0, 8).map((e) => <li key={e}>{e}</li>)}</ul>
         </div>
       )}

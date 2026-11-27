@@ -6,12 +6,14 @@ const task = (id: string, skill: string, evidence: string[][], extra: Record<str
   id, skill, question: `Вопрос ${id}`, options: [{ id: 'a', text: 'Да' }, { id: 'b', text: 'Нет' }], correctOptionId: 'a', evidenceSets: evidence, hint: 'Подсказка', ...extra,
 });
 
-function reply(prompt: string): unknown {
+function reply(full: string): unknown {
+  const prompt = full.slice(full.lastIndexOf('Текст (ID: предложение):'));
   const ids = [...prompt.matchAll(/^(s\d+): /gm)].map((m) => m[1]!);
   const last = ids[ids.length - 1] ?? 's1';
   if (prompt.includes('МАРКЕР-TASKS')) return { tasks: {} };
   if (prompt.includes('МАРКЕР-OPTIONS')) return { tasks: [task('t1', 'find', [['s1']], { options: null })] };
-  if (prompt.includes('МАРКЕР-ID')) return { tasks: [task('t1', 'find', [['s99']]), task('t2', 'infer', [['s1', 's2']], { correctOptionId: 'z' })] };
+  if (prompt.includes('МАРКЕР-ID')) return { tasks: [task('t1', 'find', [['s99']]), task('t2', 'match', [['s1', 's2']], { correctOptionId: 'z' }), task('t3', 'infer', [['s2', last]])] };
+  if (prompt.includes('МАРКЕР-QUALITY')) return { tasks: [task('t1', 'find', [['s1']]), task('t2', 'match', [['s2']]), task('t3', 'infer', [['s1', 's2']])] };
   // Корректный черновик: доказательства зависят от числа предложений, чтобы два черновика различались.
   return { tasks: [task('t1', 'find', [[last]]), task('t2', 'match', [['s1', last]]), task('t3', 'infer', [['s1', 's2'], ['s2', last]])] };
 }
@@ -24,7 +26,9 @@ createServer((req, res) => {
     if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'fake:latest' }] }));
     if (req.url === '/api/chat') {
       const prompt = (JSON.parse(body) as { messages: { content: string }[] }).messages[0]!.content;
-      return res.end(JSON.stringify({ message: { content: JSON.stringify(reply(prompt)) } }));
+      const send = () => { if (!res.destroyed) res.end(JSON.stringify({ message: { content: JSON.stringify(reply(prompt)) } })); };
+      // МАРКЕР-SLOW: отвечаем дольше таймаута e2e-сервера (OLLAMA_TIMEOUT_MS=5000).
+      return prompt.includes('МАРКЕР-SLOW') ? void setTimeout(send, 9000) : send();
     }
     res.statusCode = 404; res.end('{}');
   });

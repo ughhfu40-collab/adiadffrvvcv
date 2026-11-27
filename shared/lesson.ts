@@ -184,3 +184,41 @@ export function recommendNext(
   }
   return null;
 }
+
+// ---------- Качество новых черновиков ----------
+// Не входит в LessonSchema: старые и импортированные уроки открываются как раньше.
+
+export type QualityIssue =
+  | { code: 'missing-skill'; skill: Skill; taskIndex: null }
+  | { code: 'duplicate-skill'; skill: Skill; taskIndex: number }
+  | { code: 'too-few-evidence'; skill: Skill; taskIndex: number; setIndex: number };
+
+/** По одному заданию каждого типа; у сопоставления и вывода каждый набор — минимум два разных предложения. */
+export function qualityIssues(lesson: Pick<Lesson, 'tasks'>): QualityIssue[] {
+  const issues: QualityIssue[] = [];
+  const seen = new Set<Skill>();
+  lesson.tasks.forEach((t, i) => {
+    if (seen.has(t.skill)) issues.push({ code: 'duplicate-skill', skill: t.skill, taskIndex: i });
+    seen.add(t.skill);
+    if (t.skill === 'match' || t.skill === 'infer') {
+      t.evidenceSets.forEach((set, si) => {
+        if (new Set(set).size < 2) issues.push({ code: 'too-few-evidence', skill: t.skill, taskIndex: i, setIndex: si });
+      });
+    }
+  });
+  for (const s of ['find', 'match', 'infer'] as Skill[]) if (!seen.has(s)) issues.push({ code: 'missing-skill', skill: s, taskIndex: null });
+  return issues;
+}
+
+export function qualityIssueText(lang: Language, q: QualityIssue): string {
+  const skill = SKILL_LABELS[lang][q.skill];
+  const n = q.taskIndex === null ? '' : `${q.taskIndex + 1}`;
+  if (lang === 'kk') {
+    if (q.code === 'missing-skill') return `«${skill}» түріндегі тапсырма жоқ`;
+    if (q.code === 'duplicate-skill') return `${n}-тапсырма: «${skill}» түрі қайталанады — әр түрден бір тапсырма керек`;
+    return `${n}-тапсырма (${skill}): ${q.setIndex + 1}-жиында кемінде екі түрлі сөйлем болуы керек`;
+  }
+  if (q.code === 'missing-skill') return `Нет задания типа «${skill}»`;
+  if (q.code === 'duplicate-skill') return `Задание ${n}: тип «${skill}» повторяется — нужно по одному заданию каждого типа`;
+  return `Задание ${n} (${skill}): в наборе ${q.setIndex + 1} нужно минимум два разных предложения`;
+}

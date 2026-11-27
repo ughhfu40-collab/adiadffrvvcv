@@ -25,23 +25,32 @@ jobs:
         with: { name: student-static-demo, path: dist }
 
   deploy-pages:
-    # Публичное статическое демо ученика: собирается после зелёных тестов и пушится в ветку gh-pages.
+    # Публичное статическое демо ученика: официальный путь GitHub Pages (artifact → deploy-pages).
     needs: build-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions: { contents: write }
-    concurrency: { group: pages, cancel-in-progress: true }
+    permissions: { contents: read, pages: write, id-token: write }
+    concurrency: { group: pages, cancel-in-progress: false }
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: VITE_STUDENT_ONLY=true npm run build && touch dist/.nojekyll
-      - name: Push dist to gh-pages
+      - run: npm run build
+        env: { VITE_STUDENT_ONLY: 'true', VITE_BUILD_SHA: '${{ github.sha }}' }
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Check that the site serves this build
         run: |
-          cd dist
-          git init -q -b gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A && git commit -qm "Demo: ${GITHUB_SHA::7}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          for i in $(seq 1 30); do
+            sha=$(curl -fsS "${{ steps.deployment.outputs.page_url }}version.json?t=$(date +%s)" | sed -n 's/.*"sha":"\([0-9a-f]*\)".*/\1/p')
+            [ "$sha" = "${{ github.sha }}" ] && echo "live: $sha" && exit 0
+            sleep 10
+          done
+          echo "site still serves $sha, expected ${{ github.sha }}"; exit 1

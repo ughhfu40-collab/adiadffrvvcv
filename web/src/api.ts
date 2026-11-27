@@ -1,5 +1,5 @@
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
-export interface Health { server: string; ollama: { ok: boolean; model: string; url: string; reason?: string; models?: string[] }; startCommand: string }
+export interface Health { server: string; ollama: { ok: boolean; model: string; url: string; reason?: string; models?: string[] }; startCommand: string; timeoutSec?: number }
 export async function getHealth(): Promise<Health | { error: string }> {
   try {
     const r = await fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(3000) });

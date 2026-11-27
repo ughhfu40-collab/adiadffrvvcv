@@ -1,13 +1,16 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { buildApp } from '../../server/app';
-import { assembleDraft, generateLesson } from '../../server/ollama';
+import { assembleDraft, buildPrompt, generateLesson, GenerationCancelled, GenerationTimeout } from '../../server/ollama';
 import { splitSentences } from '../../shared/lesson';
 
 process.env.NODE_ENV = 'test';
 const text = 'Мурат посадил яблоню весной. Летом её поливали каждый день. Осенью дерево дало первые яблоки.';
 const sentences = splitSentences(text);
+const opt = [{ id: 'a', text: 'Да' }, { id: 'b', text: 'Нет' }];
 const goodTasks = { tasks: [
   { id: 't1', skill: 'find', question: 'Когда посадили?', options: [{ id: 'a', text: 'Весной' }, { id: 'b', text: 'Зимой' }], correctOptionId: 'a', evidenceSets: [['s1']], hint: 'Время года' },
+  { id: 't2', skill: 'match', question: 'Что было после посадки?', options: opt, correctOptionId: 'a', evidenceSets: [['s1', 's2']], hint: 'Весна и лето' },
+  { id: 't3', skill: 'infer', question: 'Помог ли полив?', options: opt, correctOptionId: 'a', evidenceSets: [['s2', 's3']], hint: 'Лето и осень' },
 ] };
 const meta = { id: 'x', title: 'T', language: 'ru' as const };
 
@@ -73,5 +76,45 @@ describe('сервер: структурно неверные ответы мо�
     const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru' } });
     expect(res.statusCode).toBe(422);
     expect(res.json()).toMatchObject({ kind: 'structure' });
+  });
+});
+
+describe('сервер: качество, таймаут, отмена', () => {
+  it('сопоставление на одном предложении → quality с редактируемым черновиком', () => {
+    const bad = structuredClone(goodTasks);
+    bad.tasks[1]!.evidenceSets = [['s2']];
+    const r = assembleDraft(bad, meta, sentences);
+    expect(r).toMatchObject({ ok: false, kind: 'quality' });
+    if (!r.ok && r.kind === 'quality') expect(r.issues).toEqual([{ code: 'too-few-evidence', skill: 'match', taskIndex: 1, setIndex: 0 }]);
+  });
+  it('нет задания на вывод → quality', () => {
+    const bad = { tasks: goodTasks.tasks.slice(0, 2) };
+    expect(assembleDraft(bad, meta, sentences)).toMatchObject({ kind: 'quality', issues: [{ code: 'missing-skill', skill: 'infer' }] });
+  });
+  it('промпт содержит пример сопоставления из двух предложений на языке урока', () => {
+    const p = buildPrompt('kk', sentences);
+    expect(p).toContain('Айгерім');
+    expect(p).toContain('"evidenceSets":[["s2","s3"]]');
+    expect(p).toContain('s3: Осенью');
+  });
+  const hanging = ((_u: string, init: RequestInit) => new Promise((_res, rej) => {
+    init.signal!.addEventListener('abort', () => rej(init.signal!.reason ?? new Error('aborted')));
+  })) as unknown as typeof fetch;
+  it('таймаут → GenerationTimeout и 504 kind=timeout', async () => {
+    await expect(generateLesson({ text, language: 'ru', title: '' }, hanging, undefined, 30)).rejects.toBeInstanceOf(GenerationTimeout);
+    const app = await buildApp({ timeoutMs: 30, fetchImpl: hanging });
+    const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru' } });
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ kind: 'timeout' });
+  });
+  it('отмена → GenerationCancelled', async () => {
+    const c = new AbortController();
+    const p = generateLesson({ text, language: 'ru', title: '' }, hanging, c.signal, 60_000);
+    c.abort();
+    await expect(p).rejects.toBeInstanceOf(GenerationCancelled);
+  });
+  it('таймаут по умолчанию — не меньше 10 минут', async () => {
+    const { TIMEOUT_MS } = await import('../../server/ollama');
+    expect(TIMEOUT_MS).toBeGreaterThanOrEqual(600_000);
   });
 });

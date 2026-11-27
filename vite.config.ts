@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'node:child_process';
+
+const buildSha = process.env.VITE_BUILD_SHA ?? process.env.GITHUB_SHA ?? (() => { try { return execSync('git rev-parse HEAD').toString().trim(); } catch { return 'dev'; } })();
+process.env.VITE_BUILD_SHA = buildSha;
 
 const apiTarget = process.env.API_TARGET ?? 'http://127.0.0.1:8787';
 
@@ -12,6 +16,13 @@ export default defineConfig({
   preview: { proxy: { '/api': apiTarget } },
   plugins: [
     react(),
+    {
+      // version.json — проверка, что хостинг отдаёт именно эту сборку (не кешируется service worker).
+      name: 'build-stamp',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ sha: buildSha, builtAt: new Date().toISOString(), studentOnly: process.env.VITE_STUDENT_ONLY === 'true' }) });
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,
@@ -21,7 +32,7 @@ export default defineConfig({
         theme_color: '#4f46e5', background_color: '#ffffff', start_url: '.',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,json}'], navigateFallback: 'index.html', navigateFallbackDenylist: [/^\/api\//], cleanupOutdatedCaches: true },
+      workbox: { globPatterns: ['**/*.{js,css,html,svg,json}'], globIgnores: ['version.json'], navigateFallback: 'index.html', navigateFallbackDenylist: [/^\/api\//], cleanupOutdatedCaches: true },
     }),
   ],
 });
