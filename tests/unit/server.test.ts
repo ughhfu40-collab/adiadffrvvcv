@@ -341,12 +341,25 @@ describe('вторая проверка ИИ и исправление зада�
     expect(await repairTask(lesson, 't2', [], respond({ ...base, id: 't2', skill: 'match', evidenceSets: [['s4']] }))).toMatchObject({ ok: false, kind: 'quality' });
     expect(await repairTask(lesson, 't9', [], respond({}))).toMatchObject({ ok: false, kind: 'references' });
   });
+  it('не помечает исходное задание как исправленное, если модель его повторила', async () => {
+    const russian = BL.find((l) => l.id === 'ru-saiga')!;
+    for (const [source, message] of [
+      [russian, 'ИИ вернул задание без изменений.'],
+      [lesson, 'ЖИ тапсырманы өзгерткен жоқ.'],
+    ] as const) {
+      const original = source.tasks[1]!;
+      expect(await repairTask(source, original.id, [], respond(original))).toEqual({
+        ok: false, kind: 'quality', errors: [message],
+      });
+    }
+  });
   it('исправление математики сохраняет расчёт и отклоняет неверную формулу', async () => {
     const math = BL.find((l) => l.id === 'math-ru-7-trip')!;
     const original = math.tasks[1]!;
     const { solution: _solution, calc: _calc, ...readingOnly } = original;
     expect(await repairTask(math, original.id, [], respond(readingOnly))).toMatchObject({ ok: false, kind: 'structure' });
-    const fake = vi.fn(async (_u: string | URL | Request, _init?: RequestInit) => respond(original)('http://localhost'));
+    const edited = { ...original, hint: 'Посчитай стоимость всех билетов и прибавь стоимость автобуса.' };
+    const fake = vi.fn(async (_u: string | URL | Request, _init?: RequestInit) => respond(edited)('http://localhost'));
     expect(await repairTask(math, original.id, [], fake)).toMatchObject({ ok: true, task: { calc: original.calc, solution: original.solution } });
     const request = JSON.parse(String(fake.mock.calls[0]?.[1]?.body));
     expect(request.format.required).toEqual(expect.arrayContaining(['calc', 'solution']));

@@ -1,5 +1,6 @@
 // Вторая проверка ИИ: модель перечитывает каждое задание по тексту и называет проблемы; по запросу учителя — исправляет одно задание.
 // Решение всегда за учителем: замечания ИИ не блокируют сохранение, исправление проходит ту же автоматическую проверку.
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { answerOverlap, LessonSchema, qualityIssues, qualityIssueText, TaskSchema, formatIssues, type Language, type Lesson, type Task } from '../shared/lesson';
 import { subjectOf } from '../shared/math';
@@ -235,5 +236,8 @@ export async function repairTask(lesson: Lesson, taskId: string, problems: strin
   if (!full.success) return { ok: false, kind: 'references', errors: formatIssues(full.error) };
   const issues = qualityIssues(full.data).filter((q) => q.taskIndex === index);
   if (issues.length) return { ok: false, kind: 'quality', errors: issues.map((q) => qualityIssueText(lesson.language, q)) };
+  if (isDeepStrictEqual(current, task)) return { ok: false, kind: 'quality', errors: [
+    lesson.language === 'kk' ? 'ЖИ тапсырманы өзгерткен жоқ.' : 'ИИ вернул задание без изменений.',
+  ] };
   return { ok: true, task };
 }
