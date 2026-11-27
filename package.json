@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "generate:check": "tsx scripts/ollama-check.ts",
+    "student-agent": "node scripts/student-agent.mjs",
     "rubric": "tsx scripts/rubric-check.ts"
   },
   "dependencies": {
