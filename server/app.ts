@@ -1,16 +1,13 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { hasEnoughReadingText, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
+import { hasEnoughReadingText, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
-
-/** Максимум предложений в одном тексте: длинный промпт может не поместиться в контекст модели. */
-export const MAX_SENTENCES = 40;
 
 const GenerateBody = z.object({
   text: z.string({ error: 'Нужен текст (строка)' }).trim()
     .min(20, { error: 'Текст слишком короткий (нужно от 20 символов)', abort: true })
-    .max(6000, { error: 'Текст слишком длинный (не больше 6000 символов)', abort: true })
+    .max(MAX_TEXT_CHARS, { error: `Текст слишком длинный (не больше ${MAX_TEXT_CHARS} символов)`, abort: true })
     .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`)
     .refine((t) => splitSentences(t).length <= MAX_SENTENCES, `Слишком много предложений (не больше ${MAX_SENTENCES})`),
   language: z.enum(['kk', 'ru'], { error: 'Язык урока: kk или ru' }),

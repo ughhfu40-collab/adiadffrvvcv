@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from 'react';
-import { DEFAULT_LESSON_TITLE, qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
+import { MAX_SENTENCES, MAX_TEXT_CHARS, DEFAULT_LESSON_TITLE, qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
@@ -53,6 +53,7 @@ export function Teacher() {
   };
   const loadDraft = (d: Lesson) => { updateDraft(d); setRev((r) => r + 1); };
   const sentences = useMemo(() => splitSentences(text), [text]);
+  const tooLong = text.trim().length > MAX_TEXT_CHARS || sentences.length > MAX_SENTENCES;
 
   useEffect(() => {
     let active = true;
@@ -253,7 +254,7 @@ export function Teacher() {
         </div>
         <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={loadingDraft || busy || !hasEnoughReadingText(sentences)} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
+          <button className="btn" disabled={loadingDraft || busy || !hasEnoughReadingText(sentences) || tooLong} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
           {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
           {busy && (
             <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">
@@ -263,6 +264,7 @@ export function Teacher() {
           )}
           {!busy && <button className="btn-ghost" disabled={loadingDraft || sentences.length < 2} onClick={manualDraft}>{t('tManual')}</button>}
           {!ollamaOk && !busy && <span className="text-xs text-muted">{t('tNoModel')}</span>}
+          {tooLong && <span className="text-xs text-warn" role="status" data-testid="t-too-long">{t('tTooLong', { chars: MAX_TEXT_CHARS, n: MAX_SENTENCES })}</span>}
         </div>
         {genMsg && (
           <div role="alert" data-testid={`t-msg-${genMsg.kind}`}

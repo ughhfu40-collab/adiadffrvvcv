@@ -138,6 +138,9 @@ export function splitSentences(text: string): { id: string; text: string }[] {
 
 /** Минимум для генерации: три предложения с буквами. Проверяется и в интерфейсе, и на сервере до вызова модели. */
 export const MIN_SENTENCES = 3;
+/** Верхние границы текста для генерации: длинный промпт может не поместиться в контекст модели. */
+export const MAX_SENTENCES = 40;
+export const MAX_TEXT_CHARS = 6000;
 
 export function hasEnoughReadingText(sentences: { text: string }[]): boolean {
   return sentences.filter(({ text }) => /\p{L}/u.test(text)).length >= MIN_SENTENCES;
