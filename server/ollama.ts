@@ -12,6 +12,7 @@ export class GenerationCancelled extends Error {}
 export const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 600_000);
 
 const DraftSchema = z.object({ tasks: z.array(TaskSchema).min(1) });
+const OllamaChatSchema = z.object({ message: z.object({ content: z.string().trim().min(1) }) });
 
 /** JSON Schema для structured outputs Ollama (format). */
 export const DRAFT_JSON_SCHEMA = {
@@ -129,7 +130,7 @@ export function assembleDraft(raw: unknown, meta: { id: string; title: string; l
 export async function generateLesson(input: { text: string; language: Language; title: string }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
   const sentences = splitSentences(input.text);
   const signal = cancel ? AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
-  let body: { message?: { content?: string } };
+  let body: unknown;
   try {
     const res = await fetchImpl(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
@@ -144,16 +145,19 @@ export async function generateLesson(input: { text: string; language: Language; 
       signal,
     });
     if (!res.ok) throw new OllamaUnavailable(`Ollama вернула ${res.status}: ${await res.text()}`);
-    body = (await res.json()) as { message?: { content?: string } };
+    body = await res.json();
   } catch (e) {
     if (e instanceof OllamaUnavailable) throw e;
     if (cancel?.aborted) throw new GenerationCancelled('Генерация отменена');
     if (signal.aborted || (e as Error).name === 'TimeoutError') throw new GenerationTimeout(`Модель не ответила за ${Math.round(timeoutMs / 1000)} с`);
+    if (e instanceof SyntaxError) return { ok: false, kind: 'structure', errors: ['Ollama вернула ответ в неверном формате'] };
     throw new OllamaUnavailable(`Ollama недоступна по адресу ${OLLAMA_URL}: ${(e as Error).message}`);
   }
+  const chat = OllamaChatSchema.safeParse(body);
+  if (!chat.success) return { ok: false, kind: 'structure', errors: ['В ответе Ollama нет текста черновика'] };
   let raw: unknown;
   try {
-    raw = JSON.parse(body.message?.content ?? '');
+    raw = JSON.parse(chat.data.message.content);
   } catch {
     return { ok: false, kind: 'structure', errors: ['Модель вернула не JSON'] };
   }

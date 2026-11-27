@@ -29,18 +29,32 @@ export function Teacher() {
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [structErrors, setStructErrors] = useState<string[]>([]);
   const [genMsg, setGenMsg] = useState<GenMessage | null>(null);
-  const [saved, setSaved] = useState('');
+  const [saveStatus, setSaveStatus] = useState<{ kind: 'saved' | 'error'; draft: Lesson } | null>(null);
+  const [draftStorageError, setDraftStorageError] = useState(false);
+  const [saving, setSaving] = useState(false);
   /** Ревизия загруженного черновика: меняется при каждой загрузке извне и пересоздаёт поля редактора. */
   const [rev, setRev] = useState(0);
   const loadDraft = (d: Lesson) => { setDraft(d); setRev((r) => r + 1); };
   const sentences = useMemo(() => splitSentences(text), [text]);
 
   useEffect(() => {
+    let active = true;
     void getHealth().then(setHealth);
-    void db.drafts.get('current').then((d) => { if (d && isEditableDraft(d.data)) loadDraft(d.data); });
-    return () => abortRef.current?.abort();
+    void db.drafts.get('current').then(
+      (d) => { if (active && d && isEditableDraft(d.data)) loadDraft(d.data); },
+      () => { if (active) setDraftStorageError(true); },
+    );
+    return () => { active = false; abortRef.current?.abort(); };
   }, []);
-  useEffect(() => { if (draft) void db.drafts.put({ id: 'current', data: draft, updatedAt: Date.now() }); }, [draft]);
+  useEffect(() => {
+    if (!draft) return;
+    let active = true;
+    void db.drafts.put({ id: 'current', data: draft, updatedAt: Date.now() }).then(
+      () => { if (active) setDraftStorageError(false); },
+      () => { if (active) setDraftStorageError(true); },
+    );
+    return () => { active = false; };
+  }, [draft]);
   useEffect(() => {
     if (!busy) return;
     const start = Date.now();
@@ -58,7 +72,7 @@ export function Teacher() {
   async function generate() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setBusy(true); setGenMsg(null); setServerErrors([]); setStructErrors([]); setSaved('');
+    setBusy(true); setGenMsg(null); setServerErrors([]); setStructErrors([]); setSaveStatus(null);
     try {
       const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title }), signal: ctrl.signal });
       const body = (await r.json()) as GenerateResponse;
@@ -88,9 +102,26 @@ export function Teacher() {
   const updTask = (i: number, patch: Partial<Task>) => setDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
 
   async function save() {
-    if (!canSave || !validation?.ok) return;
-    await db.lessons.put({ id: validation.lesson.id, lesson: validation.lesson, source: 'teacher', addedAt: Date.now() });
-    setSaved(t('tSaved'));
+    if (!draft || !canSave || !validation?.ok || saving) return;
+    setSaving(true);
+    setSaveStatus(null);
+    try {
+      await db.lessons.put({ id: validation.lesson.id, lesson: validation.lesson, source: 'teacher', addedAt: Date.now() });
+      setSaveStatus({ kind: 'saved', draft });
+    } catch {
+      setSaveStatus({ kind: 'error', draft });
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function deleteDraft() {
+    try {
+      await db.drafts.delete('current');
+      setDraft(null);
+      setDraftStorageError(false);
+    } catch {
+      setDraftStorageError(true);
+    }
   }
   function exportJson() {
     if (!canSave || !validation?.ok) return;
@@ -251,11 +282,13 @@ export function Teacher() {
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <button className="btn" disabled={!canSave} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
+          <button className="btn" disabled={!canSave || saving} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
           <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
-          {draft && <button className="btn-ghost text-bad" onClick={() => { setDraft(null); void db.drafts.delete('current'); }}>{t('tDelete')}</button>}
+          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => void deleteDraft()}>{t('tDelete')}</button>}
         </div>
-        {saved && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">✓ {saved}</p>}
+        {draftStorageError && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert">{t('tDraftStorageError')}</p>}
+        {saveStatus?.draft === draft && saveStatus.kind === 'error' && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-save-error">{t('tSaveError')}</p>}
+        {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">✓ {t('tSaved')}</p>}
       </section>
     </div>
   );

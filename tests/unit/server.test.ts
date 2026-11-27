@@ -53,6 +53,20 @@ describe('сервер: проверка черновика модели', () =>
 });
 
 describe('сервер: структурно неверные ответы модели', () => {
+  it('неверный ответ Ollama возвращает 422 без черновика', async () => {
+    const originals = ['null', '{"message":{"content":42}}', '<html>ошибка прокси</html>'];
+    for (const response of originals) {
+      const app = await buildApp({ fetchImpl: async () => new Response(response) });
+      try {
+        const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru' } });
+        expect(res.statusCode).toBe(422);
+        expect(res.json()).toMatchObject({ ok: false, kind: 'structure' });
+        expect(res.json()).not.toHaveProperty('draft');
+      } finally {
+        await app.close();
+      }
+    }
+  });
   it('tasks: {} → structure, без черновика', () => {
     const r = assembleDraft({ tasks: {} }, meta, sentences);
     expect(r).toMatchObject({ ok: false, kind: 'structure' });
@@ -76,6 +90,46 @@ describe('сервер: структурно неверные ответы мо�
     const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text, language: 'ru' } });
     expect(res.statusCode).toBe(422);
     expect(res.json()).toMatchObject({ kind: 'structure' });
+  });
+});
+
+describe('сервер: запросы браузера и формат ошибок HTTP', () => {
+  it('отклоняет посторонний origin до запуска модели и принимает свой или явно разрешённый', async () => {
+    const model = vi.fn(async () => new Response(JSON.stringify({ message: { content: JSON.stringify(goodTasks) } })));
+    const app = await buildApp({ fetchImpl: model, allowedOrigins: ['https://school.example'] });
+    const post = (origin: string) => app.inject({
+      method: 'POST', url: '/api/generate', headers: { host: '127.0.0.1:4173', origin }, payload: { text, language: 'ru' },
+    });
+    try {
+      const denied = await post('https://unlisted.example');
+      expect(denied.statusCode).toBe(403);
+      expect(denied.headers['access-control-allow-origin']).toBeUndefined();
+      expect(model).not.toHaveBeenCalled();
+      expect((await post('http://127.0.0.1:4173')).statusCode).toBe(200);
+      const allowed = await post('https://school.example');
+      expect(allowed.statusCode).toBe(200);
+      expect(allowed.headers['access-control-allow-origin']).toBe('https://school.example');
+      expect(model).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('отдаёт один контракт ошибок для неверного JSON, слишком большого тела и неподдерживаемого типа', async () => {
+    const app = await buildApp();
+    try {
+      for (const { status, payload, type } of [
+        { status: 400, payload: '{"text":', type: 'application/json' },
+        { status: 413, payload: JSON.stringify({ text: 'x'.repeat(1_048_576) }), type: 'application/json' },
+        { status: 415, payload: '<lesson/>', type: 'application/xml' },
+      ]) {
+        const res = await app.inject({ method: 'POST', url: '/api/generate', headers: { 'content-type': type }, payload });
+        expect(res.statusCode).toBe(status);
+        expect(res.json()).toMatchObject({ ok: false, kind: 'input', errors: [expect.any(String)] });
+      }
+    } finally {
+      await app.close();
+    }
   });
 });
 

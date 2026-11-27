@@ -17,9 +17,25 @@ export function startCommand() {
   return `ollama serve & ollama pull ${OLLAMA_MODEL}`;
 }
 
-export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {}) {
+export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fetch; allowedOrigins?: string[] } = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
-  await app.register(cors, { origin: true });
+  const allowedOrigins = opts.allowedOrigins ?? (process.env.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean);
+  app.addHook('onRequest', async (request, reply) => {
+    const { origin, host } = request.headers;
+    if (!origin || allowedOrigins.includes(origin)) return;
+    if (host && (origin === `http://${host}` || origin === `https://${host}`)) return;
+    return reply.code(403).send({ ok: false, kind: 'input', errors: ['Запрос с этого сайта запрещён.'] });
+  });
+  if (allowedOrigins.length > 0) await app.register(cors, { origin: allowedOrigins });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof Error && 'statusCode' in error) {
+      const status = error.statusCode;
+      if (status === 400 || status === 413 || status === 415) {
+        return reply.code(status).send({ ok: false, kind: 'input', errors: [error.message] });
+      }
+    }
+    return reply.send(error);
+  });
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
 
   app.get('/api/health', async () => ({ server: 'ok', ollama: await ollamaStatus(), startCommand: startCommand(), timeoutSec: Math.round(timeoutMs / 1000) }));

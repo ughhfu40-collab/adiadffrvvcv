@@ -12,6 +12,16 @@ describe('встроенные уроки', () => {
     expect(BUILTIN_LESSONS.filter((l) => l.language === 'kk')).toHaveLength(2);
     for (const l of BUILTIN_LESSONS) expect(l.tasks.map((t) => t.skill)).toEqual(['find', 'match', 'infer']);
   });
+  it('в заданиях на сопоставление одно предложение не засчитывается', () => {
+    for (const lesson of BUILTIN_LESSONS) {
+      const task = lesson.tasks.find((item) => item.skill === 'match')!;
+      for (const evidence of task.evidenceSets) {
+        expect(evidence.length, lesson.id).toBeGreaterThanOrEqual(2);
+        for (const id of evidence) expect(checkAnswer(task, task.correctOptionId, [id]).solved, lesson.id).toBe(false);
+        expect(checkAnswer(task, task.correctOptionId, evidence).solved, lesson.id).toBe(true);
+      }
+    }
+  });
 });
 
 describe('проверка ответа и доказательства отдельно', () => {

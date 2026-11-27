@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { Lesson } from '../../shared/lesson';
 
 async function generate(page: Page, text: string) {
   await page.getByTestId('t-text').fill(text);
@@ -20,7 +21,7 @@ async function exportJson(page: Page) {
     expect(download.suggestedFilename()).toMatch(/\.json$/);
     expect(await readFile((await download.path())!, 'utf8')).toBe(text);
   }
-  return JSON.parse(text as string) as { sentences: { id: string }[]; tasks: { evidenceSets: string[][] }[] };
+  return JSON.parse(text as string) as Lesson;
 }
 
 async function evidenceText(page: Page, i: number, value: string) {
@@ -167,6 +168,48 @@ test('разрыв соединения во время генерации: че
   // Повтор проходит.
   await generate(page, 'Альфа идёт. Бета идёт. Гамма идёт. Дельта идёт.');
   await expect(page.getByTestId('t-evidence-0')).toHaveValue('s4');
+});
+
+test('учитель → экспорт → импорт в новом профиле → решение офлайн и сохранение прогресса', async ({ page, browser, baseURL }, info) => {
+  await page.getByTestId('t-title').fill('Кітап көрмесі');
+  await page.getByTestId('t-lang').selectOption('kk');
+  await generate(page, 'Ертең мектепте кітап көрмесі ашылады. Көрмеге оқушылар үйден кітап әкеледі. Көрме жұма күні жабылады.');
+  const firstTask = page.getByTestId('t-task-0');
+  await firstTask.getByPlaceholder('Вопрос').fill('Көрме қашан ашылады?');
+  await firstTask.getByRole('radio').first().check();
+  await page.getByTestId('t-ev-0-s3').click();
+  await page.getByTestId('t-ev-0-s1').click();
+  await page.getByTestId('t-save').click();
+  await expect(page.getByTestId('t-saved')).toBeVisible();
+  const lesson = await exportJson(page);
+  expect(lesson.tasks[0]).toMatchObject({ question: 'Көрме қашан ашылады?', evidenceSets: [['s1']] });
+
+  const mobile = info.project.name === 'mobile';
+  const learner = await browser.newContext({ baseURL, viewport: page.viewportSize(), isMobile: mobile, hasTouch: mobile });
+  try {
+    const pupil = await learner.newPage();
+    await pupil.goto('/');
+    await expect(pupil.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+    await pupil.getByTestId('ui-lang').click();
+    await pupil.getByTestId('import-open').click();
+    await pupil.getByTestId('import-file').setInputFiles({ name: 'lesson.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(lesson)) });
+    await expect(pupil.getByTestId('import-ok')).toBeVisible();
+    await learner.setOffline(true);
+    await pupil.reload();
+    const networkBlocked = await pupil.evaluate(() => fetch('/version.json?probe=' + Date.now(), { cache: 'no-store' }).then(() => false, () => true));
+    expect(networkBlocked).toBe(true);
+    const lessonCard = pupil.getByTestId(`lesson-${lesson.id}`);
+    await lessonCard.click();
+    await pupil.getByTestId(`opt-${lesson.tasks[0]!.correctOptionId}`).check();
+    await pupil.getByTestId('sent-s1').click();
+    await pupil.getByTestId('check').click();
+    await expect(pupil.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+    await pupil.reload();
+    await expect(lessonCard).toContainText('3 тапсырманың 1-і орындалды');
+    await expect(pupil.getByText('Дағдылар бойынша прогресс')).toBeVisible();
+  } finally {
+    await learner.close();
+  }
 });
 
 test('пустой текст из пробелов и точек: генерация недоступна, модель не вызывается', async ({ page }) => {

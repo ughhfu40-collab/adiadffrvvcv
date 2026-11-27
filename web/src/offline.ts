@@ -4,11 +4,14 @@ import { registerSW } from 'virtual:pwa-register';
 export async function checkOfflineReady(): Promise<boolean> {
   if (!('serviceWorker' in navigator) || !('caches' in window)) return false;
   const reg = await navigator.serviceWorker.getRegistration();
-  if (!reg?.active) return false;
-  const shell = await caches.match('index.html', { ignoreSearch: true }) ?? await caches.match(new URL('index.html', location.href).href, { ignoreSearch: true });
+  if (!reg?.active || !navigator.serviceWorker.controller) return false;
+  const shell = await caches.match(new URL('index.html', reg.scope).href, { ignoreSearch: true });
   if (!shell) return false;
-  const scripts = [...document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')].map((s) => s.src);
-  for (const src of scripts) if (!(await caches.match(src, { ignoreSearch: true }))) return false;
+  const resources = [
+    ...Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'), (script) => script.src),
+    ...Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href]'), (style) => style.href),
+  ];
+  for (const url of resources) if (!(await caches.match(url, { ignoreSearch: true }))) return false;
   return true;
 }
 

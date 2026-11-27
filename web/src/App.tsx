@@ -13,18 +13,29 @@ const LANGS: { id: UiLang; label: string }[] = [{ id: 'kk', label: 'Қазақш
 export function App() {
   const { t, lang, setLang } = useI18n();
   const [mode, setMode] = useState<'student' | 'teacher'>('student');
-  const [ready, setReady] = useState(false);
+  const [storage, setStorage] = useState<'loading' | 'ready' | 'error'>('loading');
   const [offlineReady, setOfflineReady] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
 
   useEffect(() => {
     document.documentElement.lang = lang;
-    void seedBuiltins().then(() => setReady(true));
+  }, [lang]);
+
+  useEffect(() => {
+    if (storage !== 'loading') return;
+    let active = true;
+    void seedBuiltins().then(
+      () => { if (active) setStorage('ready'); },
+      () => { if (active) setStorage('error'); },
+    );
+    return () => { active = false; };
+  }, [storage]);
+
+  useEffect(() => {
     setupOffline(() => setOfflineReady(true));
     const on = () => setOnline(true), off = () => setOnline(false);
     addEventListener('online', on); addEventListener('offline', off);
     return () => { removeEventListener('online', on); removeEventListener('offline', off); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -61,7 +72,14 @@ export function App() {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
-        {!ready ? <p className="py-10 text-muted">{t('loading')}</p> : mode === 'student' || STATIC_DEMO ? <Student /> : <Teacher />}
+        {storage === 'loading' && <p className="py-10 text-muted">{t('loading')}</p>}
+        {storage === 'error' && (
+          <div className="card mt-8 space-y-3">
+            <p role="alert" data-testid="storage-error">{t('storageUnavailable')}</p>
+            <button type="button" className="btn" data-testid="storage-retry" onClick={() => setStorage('loading')}>{t('storageRetry')}</button>
+          </div>
+        )}
+        {storage === 'ready' && (mode === 'student' || STATIC_DEMO ? <Student /> : <Teacher />)}
       </main>
       <footer className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-6 text-xs text-muted sm:px-6">
         <a className="link" href={PITCH_URL} target="_blank" rel="noopener noreferrer">{t('pitchLink')}</a>

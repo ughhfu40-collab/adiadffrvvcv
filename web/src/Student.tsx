@@ -157,15 +157,27 @@ function ImportBox() {
   const [errors, setErrors] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'same' | 'renamed'; text: string } | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-  async function handle(raw: string) {
+  const [importing, setImporting] = useState(false);
+  async function handle(file: File) {
+    setFileName(file.name);
+    setImporting(true);
     setMsg(null);
-    const r = parseLessonJson(raw);
-    if (!r.ok) return setErrors(r.errors);
     setErrors([]);
-    const out = await importLesson(r.lesson);
-    if (out.status === 'new') setMsg({ kind: 'ok', text: t('importOk', { title: out.lesson.title }) });
-    else if (out.status === 'same') setMsg({ kind: 'same', text: t('importSame', { title: out.lesson.title }) });
-    else setMsg({ kind: 'renamed', text: t('importConflict', { id: out.originalId, title: out.lesson.title, newId: out.lesson.id }) });
+    try {
+      const r = parseLessonJson(await file.text());
+      if (!r.ok) {
+        setErrors(r.errors);
+        return;
+      }
+      const out = await importLesson(r.lesson);
+      if (out.status === 'new') setMsg({ kind: 'ok', text: t('importOk', { title: out.lesson.title }) });
+      else if (out.status === 'same') setMsg({ kind: 'same', text: t('importSame', { title: out.lesson.title }) });
+      else setMsg({ kind: 'renamed', text: t('importConflict', { id: out.originalId, title: out.lesson.title, newId: out.lesson.id }) });
+    } catch {
+      setErrors([t('importStorageError')]);
+    } finally {
+      setImporting(false);
+    }
   }
   return (
     <div className="card border-dashed">
@@ -174,8 +186,8 @@ function ImportBox() {
       {/* Своя подписанная кнопка вместо системного «Choose File»; сам input (data-testid=import-file) остаётся в DOM и доступен с клавиатуры. */}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <label className="btn cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink">
-          <input type="file" accept="application/json,.json" data-testid="import-file" className="sr-only"
-            onChange={async (e) => { const f = e.target.files?.[0]; if (f) { setFileName(f.name); await handle(await f.text()); } e.target.value = ''; }} />
+          <input type="file" accept="application/json,.json" data-testid="import-file" className="sr-only" disabled={importing}
+            onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) void handle(f); }} />
           <span aria-hidden="true">↥</span> {t('importChoose')}
         </label>
         <span className="min-w-0 break-all text-sm text-muted" data-testid="import-filename">{fileName ? t('importFile', { name: fileName }) : t('importNoFile')}</span>
@@ -201,6 +213,7 @@ const PLAYER_TEXT = {
     step1: 'Выбери ответ', step2: 'Отметь доказательство в тексте', noQuote: 'Пока ничего не отмечено.',
     toText: '↓ К тексту', toQuestion: '↑ К вопросу', marked: 'Отмечено: {n}', remove: 'Снять отметку с предложения {n}',
     needBoth: 'Чтобы проверить, выбери ответ и отметь хотя бы одно предложение.',
+    saving: 'Сохраняю…', saveError: 'Не удалось сохранить попытку. Ответ и цитаты остались выбраны. Попробуй ещё раз.',
     done: 'Урок пройден!', more: 'Ещё одно задание', back: 'К урокам', task: 'Задание {n} из {total}',
     weak: 'Навык с ошибками:', noRec: 'Без ошибок — дополнительное задание не нужно.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
   },
@@ -210,6 +223,7 @@ const PLAYER_TEXT = {
     step1: 'Жауапты таңда', step2: 'Мәтіннен дәлелді белгіле', noQuote: 'Әзірге ештеңе белгіленбеген.',
     toText: '↓ Мәтінге', toQuestion: '↑ Сұраққа', marked: 'Белгіленді: {n}', remove: '{n}-сөйлемнің белгісін алу',
     needBoth: 'Тексеру үшін жауапты таңдап, кемінде бір сөйлемді белгіле.',
+    saving: 'Сақталуда…', saveError: 'Тапсырма нәтижесі сақталмады. Жауап пен дәлелдер белгіленіп тұр. Қайта тексеріп көр.',
     done: 'Сабақ аяқталды!', more: 'Тағы бір тапсырма', back: 'Сабақтарға', task: '{total} тапсырманың {n}-сі',
     weak: 'Қатесі бар дағды:', noRec: 'Қатесіз — қосымша тапсырма керек емес.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
   },
@@ -230,6 +244,9 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   const [option, setOption] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<string[]>([]);
   const [result, setResult] = useState<CheckResult | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const writingAttempt = useRef(false);
   const [showHint, setShowHint] = useState(false);
   const [finished, setFinished] = useState(false);
   const [rec, setRec] = useState<ReturnType<typeof recommendNext>>(null);
@@ -255,16 +272,21 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
     if (window.innerWidth < 1024) questionRef.current?.scrollIntoView({ block: 'start' });
   }, [idx, finished]);
 
-  const [checking, setChecking] = useState(false);
   async function check() {
-    if (!task || checking) return;
+    if (!task || !option || !evidence.length || writingAttempt.current) return;
+    writingAttempt.current = true;
     setChecking(true);
+    setSaveError(false);
+    setResult(null);
     const r = checkAnswer(task, option, evidence);
     // Сначала записываем попытку, потом показываем итог: «Засчитано» на экране = прогресс уже в IndexedDB.
     try {
       await db.attempts.add({ lessonId: lesson.id, taskId: task.id, skill: task.skill, optionId: option, evidence, answerCorrect: r.answerCorrect, evidenceOk: r.evidence === 'correct', solved: r.solved, at: Date.now() });
-    } finally {
       setResult(r);
+    } catch {
+      setSaveError(true);
+    } finally {
+      writingAttempt.current = false;
       setChecking(false);
     }
   }
@@ -274,7 +296,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   }
   // Исправление цитаты не сбрасывает выбранный ответ (и наоборот).
   const toggle = (id: string) => {
-    if (result?.solved) return;
+    if (result?.solved || writingAttempt.current) return;
     setResult(null);
     setEvidence((e) => (e.includes(id) ? e.filter((x) => x !== id) : [...e, id].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))));
   };
@@ -327,7 +349,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                     const sel = option === o.id;
                     return (
                       <label key={o.id} className={`flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border p-3 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${sel ? 'border-brand bg-brand-soft' : 'border-line hover:border-brand/50'} ${result?.solved ? 'cursor-default' : ''}`}>
-                        <input type="radio" name="opt" data-testid={`opt-${o.id}`} checked={sel} disabled={!!result?.solved}
+                        <input type="radio" name="opt" data-testid={`opt-${o.id}`} checked={sel} disabled={checking || !!result?.solved}
                           onChange={() => { setOption(o.id); setResult(null); }} className="mt-1 h-4 w-4 shrink-0 accent-[rgb(var(--brand))]" />
                         <span className={sel ? 'font-medium' : ''}>{o.text}</span>
                       </label>
@@ -356,7 +378,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                             <span className="sent-num mt-0.5 border-transparent bg-brand text-on-brand">{n}</span>
                             <span className="line-clamp-2 flex-1 font-serif">{s?.text}</span>
                             {!result?.solved && (
-                              <button type="button" className="-m-1 rounded-lg px-2 py-1 text-base leading-none hover:bg-marker" aria-label={fill(t.remove, { n })} onClick={() => toggle(sid)}>×</button>
+                              <button type="button" className="-m-1 rounded-lg px-2 py-1 text-base leading-none hover:bg-marker" aria-label={fill(t.remove, { n })} disabled={checking} onClick={() => toggle(sid)}>×</button>
                             )}
                           </li>
                         );
@@ -380,12 +402,13 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                   {parts.tip && <p className="pl-[34px] text-sm text-muted" data-testid="feedback-tip">{parts.tip}</p>}
                 </div>
               )}
+              {saveError && <p role="alert" data-testid="attempt-save-error" className="rounded-xl bg-bad-soft p-3 text-sm text-bad">{t.saveError}</p>}
               {showHint && <p className="rounded-xl border-l-4 border-marker bg-paper p-3 text-sm italic" data-testid="hint">{task.hint}</p>}
               {!result && (!option || evidence.length === 0) && <p className="text-sm text-muted">{t.needBoth}</p>}
               <div className="flex flex-wrap gap-2">
                 {result?.solved
                   ? <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="next" onClick={next}>{isLast ? t.finish : t.next} <span aria-hidden="true">→</span></button>
-                  : <button type="button" className="btn" data-testid="check" disabled={checking || !option || evidence.length === 0} onClick={() => void check()}>{result ? t.recheck : t.check}</button>}
+                  : <button type="button" className="btn" data-testid="check" disabled={checking || !option || evidence.length === 0} onClick={() => void check()}>{checking ? t.saving : (result || saveError) ? t.recheck : t.check}</button>}
                 {!result?.solved && !showHint && <button type="button" className="btn-ghost" onClick={() => setShowHint(true)}>{t.hint}</button>}
               </div>
             </div>
@@ -404,7 +427,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
               const on = evidence.includes(s.id);
               return (
                 <span key={s.id}>
-                  <button type="button" data-testid={`sent-${s.id}`} aria-pressed={on} disabled={finished} onClick={() => toggle(s.id)} className="sent">
+                  <button type="button" data-testid={`sent-${s.id}`} aria-pressed={on} disabled={finished || checking || !!result?.solved} onClick={() => toggle(s.id)} className="sent">
                     <span className="sent-num" aria-hidden="true">{on ? '✓' : i + 1}</span>
                     <span className="sr-only">{t.sentence} {i + 1}: </span>{s.text}
                   </button>{' '}

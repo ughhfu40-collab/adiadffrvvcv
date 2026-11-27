@@ -31,7 +31,7 @@ test('офлайн: готовность, отключение сети, пер�
   await page.getByTestId('lesson-kk-library').click();
   await answer(page, 'a', ['s3']);
   await page.getByTestId('next').click();
-  await answer(page, 'b', ['s2']);
+  await answer(page, 'b', ['s2', 's3']);
   await page.getByTestId('next').click();
   await answer(page, 'a', ['s5']);
   await expect(page.getByTestId('feedback')).toHaveAttribute('data-evidence', 'missing');
@@ -301,4 +301,40 @@ test('медленная запись в IndexedDB: «Засчитано» то�
     };
   }));
   expect(attempts).toBe(1);
+});
+
+test('сбой записи попытки: нет результата, выбранные ответ и цитата остаются, повтор сохраняет прогресс', async ({ page, context }) => {
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.add;
+    let failOnce = true;
+    IDBObjectStore.prototype.add = function (...args: Parameters<typeof original>) {
+      if (failOnce && this.name === 'attempts') {
+        failOnce = false;
+        throw new DOMException('Cannot write this attempt', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'b', ['s1']);
+  await expect(page.getByTestId('attempt-save-error')).toBeVisible();
+  await expect(page.getByTestId('feedback')).toHaveCount(0);
+  await expect(page.getByTestId('opt-b')).toBeChecked();
+  await expect(page.getByTestId('sent-s1')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await expect(page.getByTestId('attempt-save-error')).toHaveCount(0);
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
+});
+
+test('после установки service worker версию сборки можно открыть напрямую', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  const response = await page.goto('/version.json');
+  expect(response?.ok()).toBe(true);
+  expect(await response?.json()).toMatchObject({ sha: expect.any(String), studentOnly: false });
 });
