@@ -8,6 +8,7 @@
     "dev:server": "tsx watch server/index.ts",
     "server": "tsx server/index.ts",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "postbuild": "node scripts/assemble-pitch.mjs",
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

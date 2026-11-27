@@ -3,7 +3,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 export type UiLang = 'kk' | 'ru';
 
 /** Питч-видео: как учитель создаёт урок с ИИ. */
-export const PITCH_URL = 'https://github.com/ughhfu40-collab/adiadffrvvcv/blob/main/docs/pitch/oqy-pitch.webm';
+export const PITCH_URL = 'https://ughhfu40-collab.github.io/adiadffrvvcv/pitch-final.mp4';
 
 const ru = {
   appTitle: 'Oqy',
