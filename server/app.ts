@@ -1,17 +1,27 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { hasEnoughReadingText, LanguageSchema, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
+import { hasEnoughReadingText, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
+/** Максимум предложений в одном тексте: длинный промпт может не поместиться в контекст модели. */
+export const MAX_SENTENCES = 40;
+
 const GenerateBody = z.object({
-  text: z.string().trim()
-    .min(20, 'Текст слишком короткий (нужно от 20 символов)')
-    .max(6000)
-    .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`),
-  language: LanguageSchema,
-  title: z.string().trim().max(120).default(''),
+  text: z.string({ error: 'Нужен текст (строка)' }).trim()
+    .min(20, { error: 'Текст слишком короткий (нужно от 20 символов)', abort: true })
+    .max(6000, { error: 'Текст слишком длинный (не больше 6000 символов)', abort: true })
+    .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`)
+    .refine((t) => splitSentences(t).length <= MAX_SENTENCES, `Слишком много предложений (не больше ${MAX_SENTENCES})`),
+  language: z.enum(['kk', 'ru'], { error: 'Язык урока: kk или ru' }),
+  title: z.string({ error: 'Название — строка' }).trim().max(120, 'Название слишком длинное (не больше 120 символов)').default(''),
 });
+
+const HTTP_INPUT_ERRORS: Record<number, string> = {
+  400: 'Некорректный запрос: нужен JSON с полями text и language',
+  413: 'Запрос слишком большой: текст урока — не больше 6000 символов',
+  415: 'Неподдерживаемый формат: отправьте JSON (content-type: application/json)',
+};
 
 export function startCommand() {
   return `ollama serve & ollama pull ${OLLAMA_MODEL}`;
@@ -31,7 +41,8 @@ export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fe
     if (error instanceof Error && 'statusCode' in error) {
       const status = error.statusCode;
       if (status === 400 || status === 413 || status === 415) {
-        return reply.code(status).send({ ok: false, kind: 'input', errors: [error.message] });
+        // Сообщения Fastify на английском и техничны — учителю показываем понятный текст.
+        return reply.code(status).send({ ok: false, kind: 'input', errors: [HTTP_INPUT_ERRORS[status]!] });
       }
     }
     return reply.send(error);
@@ -47,7 +58,12 @@ export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fe
 
   app.post('/api/generate', async (req, reply) => {
     const body = GenerateBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ ok: false, kind: 'input', errors: body.error.issues.map((i) => i.message) });
+    if (!body.success) {
+      // Одно сообщение на поле: первое и самое точное (например, «Нужен текст», а не ещё и «слишком короткий»).
+      const seen = new Set<string>();
+      const errors = body.error.issues.filter((i) => { const k = i.path.join('.'); if (seen.has(k)) return false; seen.add(k); return true; }).map((i) => i.message);
+      return reply.code(400).send({ ok: false, kind: 'input', errors });
+    }
     // Клиент закрыл соединение (кнопка «Отменить») — прерываем запрос к Ollama, чтобы не грузить ноутбук зря.
     const cancel = new AbortController();
     reply.raw.on('close', () => { if (!reply.raw.writableFinished) cancel.abort(); });

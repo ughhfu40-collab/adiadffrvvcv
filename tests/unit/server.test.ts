@@ -198,3 +198,30 @@ describe('стресс-находки: пустой текст и уникаль
     expect(new Set(ids).size).toBe(500);
   });
 });
+
+describe('ошибки ввода — на русском, одно сообщение на поле, модель не вызывается', () => {
+  it('длина, язык, название, тип, число предложений, не-JSON, не тот content-type', async () => {
+    const spy = vi.fn();
+    const app = await buildApp({ fetchImpl: spy as unknown as typeof fetch });
+    const send = (payload: string, ct = 'application/json') => app.inject({ method: 'POST', url: '/api/generate', payload, headers: { 'content-type': ct } });
+    const three = 'Первое тут. Второе тут. Третье тут.';
+    const cases: [string, string, number, RegExp][] = [
+      [JSON.stringify({ text: 'а. '.repeat(3000), language: 'ru' }), 'application/json', 400, /не больше 6000/],
+      [JSON.stringify({ text: three, language: 'en' }), 'application/json', 400, /kk или ru/],
+      [JSON.stringify({ text: three, language: 'ru', title: 'x'.repeat(121) }), 'application/json', 400, /не больше 120/],
+      [JSON.stringify({ text: ['x'], language: 'ru' }), 'application/json', 400, /^Нужен текст/],
+      [JSON.stringify({ text: 'Слово тут. '.repeat(50), language: 'ru' }), 'application/json', 400, /не больше 40/],
+      ['{"text":', 'application/json', 400, /нужен JSON/],
+      ['<a/>', 'application/xml', 415, /отправьте JSON/],
+    ];
+    for (const [payload, ct, status, msg] of cases) {
+      const r = await send(payload, ct);
+      expect(r.statusCode, payload.slice(0, 30)).toBe(status);
+      const errors = r.json().errors as string[];
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(msg);
+      expect(errors[0]).not.toMatch(/Too big|Invalid|expected/);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
