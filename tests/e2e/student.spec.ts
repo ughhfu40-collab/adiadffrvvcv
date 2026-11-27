@@ -249,3 +249,56 @@ test('одновременный импорт из двух вкладок: ис
   await a.reload();
   await expect(a.locator('[data-testid^="lesson-ru-saiga"]')).toHaveCount(3);
 });
+
+/**
+ * Медленная запись в IndexedDB без подмены кода: вторая вкладка держит открытой readwrite-транзакцию на «attempts»,
+ * поэтому запись попытки из первой вкладки ждёт своей очереди (IndexedDB упорядочивает rw-транзакции).
+ */
+async function holdAttemptsStore(page: Page, ms: number) {
+  await page.evaluate((ms) => new Promise<void>((started) => {
+    const req = indexedDB.open('oqy-reader');
+    req.onsuccess = () => {
+      const tx = req.result.transaction('attempts', 'readwrite');
+      const store = tx.objectStore('attempts');
+      const end = Date.now() + ms;
+      const spin = () => { if (Date.now() < end) store.count().onsuccess = spin; };
+      spin();
+      (window as unknown as { __released: Promise<void> }).__released = new Promise((r) => { tx.oncomplete = () => r(); });
+      started();
+    };
+  }), ms);
+}
+
+test('медленная запись в IndexedDB: «Засчитано» только после записи, двойное нажатие = одна попытка, прогресс переживает офлайн-перезагрузку', async ({ context }) => {
+  const a = await context.newPage();
+  await a.goto('/');
+  await expect(a.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  await a.getByTestId('lesson-ru-saiga').click();
+  await a.getByTestId('opt-b').check();
+  await a.getByTestId('sent-s1').click();
+
+  const blocker = await context.newPage();
+  await blocker.goto('/');
+  await holdAttemptsStore(blocker, 3000);
+
+  await a.getByTestId('check').dblclick();
+  // Пока запись стоит в очереди, итог не показывается.
+  await a.waitForTimeout(1500);
+  await expect(a.locator('[data-testid="feedback"][data-solved="true"]')).toHaveCount(0);
+
+  await blocker.evaluate(() => (window as unknown as { __released: Promise<void> }).__released);
+  await expect(a.locator('[data-testid="feedback"][data-solved="true"]')).toBeVisible();
+
+  // Сразу после «Засчитано» — без сети и перезагрузка.
+  await context.setOffline(true);
+  await a.reload();
+  await expect(a.getByTestId('lesson-ru-saiga')).toContainText('1 из 3');
+  const attempts = await a.evaluate(() => new Promise<number>((done) => {
+    const req = indexedDB.open('oqy-reader');
+    req.onsuccess = () => {
+      const all = req.result.transaction('attempts').objectStore('attempts').getAll();
+      all.onsuccess = () => done((all.result as { lessonId: string; taskId: string }[]).filter((x) => x.lessonId === 'ru-saiga' && x.taskId === 't1').length);
+    };
+  }));
+  expect(attempts).toBe(1);
+});

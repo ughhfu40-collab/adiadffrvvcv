@@ -255,11 +255,18 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
     if (window.innerWidth < 1024) questionRef.current?.scrollIntoView({ block: 'start' });
   }, [idx, finished]);
 
+  const [checking, setChecking] = useState(false);
   async function check() {
-    if (!task) return;
+    if (!task || checking) return;
+    setChecking(true);
     const r = checkAnswer(task, option, evidence);
-    setResult(r);
-    await db.attempts.add({ lessonId: lesson.id, taskId: task.id, skill: task.skill, optionId: option, evidence, answerCorrect: r.answerCorrect, evidenceOk: r.evidence === 'correct', solved: r.solved, at: Date.now() });
+    // Сначала записываем попытку, потом показываем итог: «Засчитано» на экране = прогресс уже в IndexedDB.
+    try {
+      await db.attempts.add({ lessonId: lesson.id, taskId: task.id, skill: task.skill, optionId: option, evidence, answerCorrect: r.answerCorrect, evidenceOk: r.evidence === 'correct', solved: r.solved, at: Date.now() });
+    } finally {
+      setResult(r);
+      setChecking(false);
+    }
   }
   function next() {
     setOption(null); setEvidence([]); setResult(null); setShowHint(false);
@@ -378,7 +385,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
               <div className="flex flex-wrap gap-2">
                 {result?.solved
                   ? <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="next" onClick={next}>{isLast ? t.finish : t.next} <span aria-hidden="true">→</span></button>
-                  : <button type="button" className="btn" data-testid="check" disabled={!option || evidence.length === 0} onClick={() => void check()}>{result ? t.recheck : t.check}</button>}
+                  : <button type="button" className="btn" data-testid="check" disabled={checking || !option || evidence.length === 0} onClick={() => void check()}>{result ? t.recheck : t.check}</button>}
                 {!result?.solved && !showHint && <button type="button" className="btn-ghost" onClick={() => setShowHint(true)}>{t.hint}</button>}
               </div>
             </div>
