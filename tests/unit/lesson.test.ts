@@ -6,6 +6,28 @@ import { BUILTIN_LESSONS } from '../../shared/builtin';
 const saiga = BUILTIN_LESSONS.find((l) => l.id === 'ru-saiga')!;
 const [find, match, infer] = saiga.tasks as [Lesson['tasks'][0], Lesson['tasks'][0], Lesson['tasks'][0]];
 
+it('урок с полями только из пробелов нельзя импортировать или сохранить', () => {
+  const lesson = structuredClone(saiga);
+  lesson.title = ' \n ';
+  lesson.sentences[0]!.text = '  ';
+  lesson.tasks[0]!.question = '\t';
+  lesson.tasks[0]!.options[0]!.text = '  ';
+  lesson.tasks[0]!.hint = '\n';
+  const result = parseLessonJson(JSON.stringify(lesson));
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.errors.map((error) => error.split(':')[0])).toEqual(
+    expect.arrayContaining(['title', 'sentences.0.text', 'tasks.0.question', 'tasks.0.options.0.text', 'tasks.0.hint']),
+  );
+});
+
+it('десятичная точка не разбивает предложение и не меняет ID доказательства', () => {
+  expect(splitSentences('Длина тропы 2.5 км. За час прошли больше 1.25 км! Дальше начался подъём.')).toEqual([
+    { id: 's1', text: 'Длина тропы 2.5 км.' },
+    { id: 's2', text: 'За час прошли больше 1.25 км!' },
+    { id: 's3', text: 'Дальше начался подъём.' },
+  ]);
+});
+
 describe('встроенные уроки', () => {
   it('4 урока: 2 kk + 2 ru, по 3 задания на все навыки', () => {
     expect(BUILTIN_LESSONS).toHaveLength(4);

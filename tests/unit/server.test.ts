@@ -174,10 +174,10 @@ describe('сервер: качество, таймаут, отмена', () => {
 });
 
 describe('стресс-находки: пустой текст и уникальность ID', () => {
-  it('пробелы и точки отклоняются до вызова модели', async () => {
+  it('пробелы, точки и последовательности чисел без текста отклоняются до вызова модели', async () => {
     const spy = vi.fn();
     const app = await buildApp({ fetchImpl: spy as unknown as typeof fetch });
-    for (const t of [' '.repeat(40), '   .   .   .   .   .   .   ', '\n\t'.repeat(15)]) {
+    for (const t of [' '.repeat(40), '   .   .   .   .   .   .   ', '\n\t'.repeat(15), '1234567. 3984651. 3256179.']) {
       const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text: t, language: 'ru' } });
       expect(res.statusCode).toBe(400);
     }

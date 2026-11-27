@@ -14,7 +14,8 @@ export function App() {
   const { t, lang, setLang } = useI18n();
   const [mode, setMode] = useState<'student' | 'teacher'>('student');
   const [storage, setStorage] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [offlineReady, setOfflineReady] = useState(false);
+  const [offline, setOffline] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const offlineLabel = t(offline === 'ready' ? 'offlineReady' : offline === 'unavailable' ? 'offlineUnavailable' : 'offlineLoading');
   const [online, setOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -32,10 +33,10 @@ export function App() {
   }, [storage]);
 
   useEffect(() => {
-    setupOffline(() => setOfflineReady(true));
+    const stopOffline = setupOffline(setOffline);
     const on = () => setOnline(true), off = () => setOnline(false);
     addEventListener('online', on); addEventListener('offline', off);
-    return () => { removeEventListener('online', on); removeEventListener('offline', off); };
+    return () => { stopOffline?.(); removeEventListener('online', on); removeEventListener('offline', off); };
   }, []);
 
   return (
@@ -45,10 +46,10 @@ export function App() {
           <span className="mr-auto font-serif text-[1.7rem] font-bold leading-none tracking-tight text-ink" translate="no">
             {t('appTitle')}<span className="text-brand-ink" aria-hidden="true">.</span>
           </span>
-          <span data-testid="offline-status" data-ready={offlineReady} role="status" title={offlineReady ? t('offlineReady') : t('offlineLoading')}
+          <span data-testid="offline-status" data-ready={offline === 'ready'} role="status" title={offlineLabel}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-muted">
-            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${offlineReady ? 'bg-ok' : 'animate-pulse bg-line'}`} />
-            <span className="max-[419px]:sr-only">{offlineReady ? t('offlineReady') : t('offlineLoading')}</span>
+            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${offline === 'ready' ? 'bg-ok' : offline === 'unavailable' ? 'bg-warn' : 'animate-pulse bg-line'}`} />
+            <span className={offline === 'unavailable' ? undefined : 'max-[419px]:sr-only'}>{offlineLabel}</span>
           </span>
           {!online && <span className="badge border-warn/40 bg-warn-soft text-warn">{t('noNetwork')}</span>}
           {/* Одна кнопка-переключатель (data-testid=ui-lang): видны оба языка, активный — залит. */}

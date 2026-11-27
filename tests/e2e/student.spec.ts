@@ -1,10 +1,49 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import type { Lesson } from '../../shared/lesson';
 
 async function answer(page: Page, opt: string, sents: string[]) {
   await page.getByTestId(`opt-${opt}`).check();
   for (const s of sents) await page.getByTestId(`sent-${s}`).click();
   await page.getByTestId('check').click();
 }
+
+test('без доступа к кешу приложение сообщает об этом, а уроки остаются доступны', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(window, 'caches', { value: undefined }));
+  await page.goto('/');
+  const status = page.getByTestId('offline-status');
+  await expect(status).toHaveAttribute('title', 'Офлайн недоступен', { timeout: 4000 });
+  await expect(status).toHaveAttribute('data-ready', 'false');
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'b', ['s1']);
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+});
+test('длинные слова и много заданий в импортированном уроке помещаются в экран', async ({ page }) => {
+  const lessonFixture = JSON.parse(readFileSync('docs/pitch/lesson-kk-after-teacher.json', 'utf8')) as Lesson;
+  const longWord = 'Длинноесли́тноеслово'.repeat(24);
+  const first = lessonFixture.tasks[0]!;
+  const lesson = {
+    ...lessonFixture,
+    id: 'long-content',
+    title: longWord,
+    sentences: lessonFixture.sentences.map((s, i) => i === 0 ? { ...s, text: longWord } : s),
+    tasks: Array.from({ length: 28 }, (_, i) => ({
+      ...first,
+      id: `long-task-${i}`,
+      question: longWord,
+      options: first.options.map((o, j) => j === 0 ? { ...o, text: longWord } : o),
+    })),
+  };
+  await page.goto('/');
+  await page.getByTestId('import-open').click();
+  await page.getByTestId('import-file').setInputFiles({ name: 'long.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(lesson)) });
+  await expect(page.getByTestId('import-ok')).toBeVisible();
+  const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+  expect(await fits(), 'каталог').toBe(true);
+  await page.getByTestId('lesson-long-content').click();
+  await expect(page.getByTestId('question')).toHaveText(longWord);
+  expect(await fits(), 'открытый урок').toBe(true);
+});
 
 test('офлайн: готовность, отключение сети, перезагрузка, задание и сохранённый прогресс', async ({ page, context }) => {
   await page.goto('/');

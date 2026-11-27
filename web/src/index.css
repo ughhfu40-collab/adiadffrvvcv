@@ -54,7 +54,7 @@
 
 html { scroll-padding-top: 1rem; }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-body { @apply bg-paper font-sans text-ink antialiased; -webkit-text-size-adjust: 100%; }
+body { @apply bg-paper font-sans text-ink antialiased; overflow-wrap: anywhere; -webkit-text-size-adjust: 100%; }
 :focus-visible { outline: 3px solid rgb(var(--brand-ink)); outline-offset: 2px; }
 
 @layer components {
@@ -69,7 +69,7 @@ body { @apply bg-paper font-sans text-ink antialiased; -webkit-text-size-adjust:
   .link { @apply font-medium text-brand-ink underline decoration-brand/40 decoration-2 underline-offset-4 hover:decoration-brand; }
 
   /* Предложение текста: реагирует на нажатие; выбранное — маркер + подчёркивание + галочка в номере (не только цвет). */
-  .sent { @apply rounded-md px-1 py-0.5 text-left transition-colors hover:bg-marker/35 active:bg-marker/80 disabled:cursor-default disabled:hover:bg-transparent; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .sent { @apply max-w-full rounded-md px-1 py-0.5 text-left transition-colors hover:bg-marker/35 active:bg-marker/80 disabled:cursor-default disabled:hover:bg-transparent; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
   .sent[aria-pressed='true'] { @apply bg-marker text-marker-ink underline decoration-2 underline-offset-[5px] hover:bg-marker; text-decoration-color: rgb(var(--marker-ink) / 0.45); }
   .sent-num { @apply mr-1 inline-flex h-5 min-w-5 -translate-y-px items-center justify-center rounded-full border border-line px-1 align-middle font-sans text-[11px] font-semibold not-italic text-muted no-underline; }
   .sent[aria-pressed='true'] .sent-num { @apply border-transparent bg-brand text-on-brand; }

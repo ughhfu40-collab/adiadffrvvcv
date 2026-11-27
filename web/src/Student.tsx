@@ -83,8 +83,8 @@ export function Student() {
                   </span>
                   <span className="mt-3 font-serif text-xl font-semibold leading-snug group-hover:text-brand-ink" lang={lesson.language}>{lesson.title}</span>
                   <span className="mt-1 line-clamp-2 text-sm text-muted" lang={lesson.language}>{lesson.sentences[0]?.text}</span>
-                  <span className="mt-auto flex items-center gap-3 pt-4">
-                    <span className="flex gap-1" aria-hidden="true">
+                  <span className="mt-auto flex flex-wrap items-center gap-3 pt-4">
+                    <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
                       {lesson.tasks.map((x) => <span key={x.id} className={`h-1.5 w-6 rounded-full ${solved.has(`${lesson.id}/${x.id}`) ? 'bg-brand' : 'bg-line'}`} />)}
                     </span>
                     <span className="text-sm text-muted">{t('doneOf', { d: done, n: lesson.tasks.length })}</span>
@@ -314,7 +314,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
       <h1 className="mt-5 text-balance font-serif text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{lesson.title}</h1>
       {!finished && task && (
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted">
-          <span className="flex gap-1" aria-hidden="true">
+          <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
             {tasks.map((x, k) => <span key={x.id} className={`h-1.5 w-8 rounded-full ${k < idx ? 'bg-brand' : k === idx ? 'bg-brand/50' : 'bg-line'}`} />)}
           </span>
           <span>{fill(t.task, { n: idx + 1, total: tasks.length })} · {SKILL_LABELS[lang][task.skill]}</span>
@@ -340,7 +340,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
             <div className="space-y-5">
               <p className="font-serif text-xl font-semibold leading-snug sm:text-2xl" data-testid="question">{task.question}</p>
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className="mb-2 flex items-center gap-2 text-sm font-semibold">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs text-paper" aria-hidden="true">1</span>{t.step1}
                 </legend>

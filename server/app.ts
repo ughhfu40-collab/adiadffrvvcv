@@ -1,14 +1,14 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { LanguageSchema, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
+import { hasEnoughReadingText, LanguageSchema, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
 const GenerateBody = z.object({
   text: z.string().trim()
     .min(20, 'Текст слишком короткий (нужно от 20 символов)')
     .max(6000)
-    .refine((t) => splitSentences(t).length >= MIN_SENTENCES, `Нужно минимум ${MIN_SENTENCES} предложения с буквами`),
+    .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`),
   language: LanguageSchema,
   title: z.string().trim().max(120).default(''),
 });

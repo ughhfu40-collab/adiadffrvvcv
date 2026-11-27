@@ -2,7 +2,7 @@ import { registerSW } from 'virtual:pwa-register';
 
 /** Готовность офлайна: SW активен И в кеше есть оболочка приложения и бандл со встроенными уроками. */
 export async function checkOfflineReady(): Promise<boolean> {
-  if (!('serviceWorker' in navigator) || !('caches' in window)) return false;
+  if (!navigator.serviceWorker || !window.caches) return false;
   const reg = await navigator.serviceWorker.getRegistration();
   if (!reg?.active || !navigator.serviceWorker.controller) return false;
   const shell = await caches.match(new URL('index.html', reg.scope).href, { ignoreSearch: true });
@@ -15,12 +15,47 @@ export async function checkOfflineReady(): Promise<boolean> {
   return true;
 }
 
-export function setupOffline(onReady: () => void) {
-  if (import.meta.env.DEV) return;
-  registerSW({ immediate: true, onOfflineReady: () => void checkOfflineReady().then((ok) => ok && onReady()) });
-  const poll = async (n: number) => {
-    if (await checkOfflineReady()) return onReady();
-    if (n > 0) setTimeout(() => void poll(n - 1), 1000);
+export function setupOffline(onStatus: (status: 'ready' | 'unavailable') => void) {
+  if (import.meta.env.DEV || !navigator.serviceWorker || !window.caches) {
+    onStatus('unavailable');
+    return;
+  }
+  let active = true;
+  let ready = false;
+  let checking = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const report = (status: 'ready' | 'unavailable') => {
+    if (!active || ready) return;
+    ready = status === 'ready';
+    onStatus(status);
   };
+  const poll = async (attempts: number) => {
+    if (!active || ready || checking) return;
+    checking = true;
+    try {
+      if (await checkOfflineReady()) return report('ready');
+    } catch {
+      return report('unavailable');
+    } finally {
+      checking = false;
+    }
+    if (!active) return;
+    if (attempts > 0) timer = setTimeout(() => void poll(attempts - 1), 1000);
+    else report('unavailable');
+  };
+  registerSW({
+    immediate: true,
+    onOfflineReady: () => {
+      if (active) {
+        clearTimeout(timer);
+        void poll(60);
+      }
+    },
+    onRegisterError: () => report('unavailable'),
+  });
   void poll(60);
+  return () => {
+    active = false;
+    clearTimeout(timer);
+  };
 }

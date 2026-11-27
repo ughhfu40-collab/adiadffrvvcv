@@ -29,6 +29,22 @@ async function evidenceText(page: Page, i: number, value: string) {
   await page.getByTestId(`t-evidence-${i}`).fill(value);
 }
 
+function waitForStoredQuestion(page: Page, question: string) {
+  return page.waitForFunction(expected => new Promise<boolean>(resolve => {
+    const open = indexedDB.open('oqy-reader');
+    open.onerror = () => resolve(false);
+    open.onsuccess = () => {
+      const db = open.result;
+      const read = db.transaction('drafts').objectStore('drafts').get('current');
+      read.onerror = () => { db.close(); resolve(false); };
+      read.onsuccess = () => {
+        db.close();
+        resolve(read.result?.data?.tasks?.[0]?.question === expected);
+      };
+    };
+  }), question);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const orig = URL.createObjectURL.bind(URL);
@@ -48,6 +64,91 @@ test('e2e работает только с поддельной моделью, 
   expect(health.timeoutSec).toBe(5);
 });
 
+test('текст, название и язык сохраняются до создания черновика', async ({ page, context }) => {
+  const text = 'В первой строке цель урока.\nВо второй — расписание.';
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  await page.getByTestId('t-title').fill('Расписание и цель');
+  await page.getByTestId('t-lang').selectOption('kk');
+  await page.getByTestId('t-text').fill(text);
+  await page.getByTestId('mode-student').click();
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByTestId('mode-teacher').click();
+  await expect(page.getByTestId('t-title')).toHaveValue('Расписание и цель', { timeout: 4000 });
+  await expect(page.getByTestId('t-lang')).toHaveValue('kk');
+  await expect(page.getByTestId('t-text')).toHaveValue(text);
+  await expect(page.getByTestId('t-draft')).toHaveCount(0);
+});
+
+test('поломанный JSON статуса генерации оставляет предыдущий черновик открытым', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  const question = page.getByTestId('t-task-0').getByPlaceholder('Вопрос');
+  await question.fill('Ручная правка');
+  await page.route('**/api/generate', route => route.fulfill({ status: 422, json: { ok: false, kind: 'structure', errors: 'Ожидался массив' } }));
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-struct-error')).toBeVisible({ timeout: 4000 });
+  await expect(question).toHaveValue('Ручная правка');
+});
+
+test('устаревшая правка в другой вкладке не стирает сохранённый черновик', async ({ page, context }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  const question = (p: Page) => p.getByTestId('t-task-0').getByPlaceholder('Вопрос');
+  const initial = await question(page).inputValue();
+  await waitForStoredQuestion(page, initial);
+  const another = await context.newPage();
+  try {
+    await another.goto('/');
+    await another.getByTestId('mode-teacher').click();
+    await expect(question(another)).toHaveValue(initial);
+    await question(page).fill('Правка из первой вкладки');
+    await waitForStoredQuestion(page, 'Правка из первой вкладки');
+    await question(another).fill('Правка из устаревшей вкладки');
+    await expect(another.getByTestId('t-draft-storage-error')).toContainText('Черновик изменился в другой вкладке', { timeout: 4000 });
+    await expect(question(another)).toHaveValue('Правка из устаревшей вкладки');
+    await page.reload();
+    await page.getByTestId('mode-teacher').click();
+    await expect(question(page)).toHaveValue('Правка из первой вкладки');
+  } finally {
+    await another.close();
+  }
+});
+
+test('сохранение отредактированного урока создаёт версию и сохраняет прежний прогресс', async ({ page }) => {
+  const title = 'Урок с двумя версиями';
+  await page.getByTestId('t-title').fill(title);
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  const lesson = await exportJson(page);
+  const first = lesson.tasks[0]!;
+  const save = async () => {
+    await page.getByTestId('t-save').click();
+    await expect(page.getByTestId('t-saved')).toBeVisible();
+  };
+  await save();
+  await page.getByTestId('mode-student').click();
+  const original = page.getByTestId(`lesson-${lesson.id}`);
+  await original.click();
+  await page.getByTestId(`opt-${first.correctOptionId}`).check();
+  for (const id of first.evidenceSets[0]!) await page.getByTestId(`sent-${id}`).click();
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await page.getByTestId('mode-teacher').click();
+  const changedQuestion = 'Как звучит новый вопрос?';
+  await page.getByTestId('t-task-0').getByPlaceholder('Вопрос').fill(changedQuestion);
+  await save();
+  await save();
+  expect((await exportJson(page)).id).toBe(`${lesson.id}-v2`);
+  await page.getByTestId('mode-student').click();
+  await expect(original).toContainText('Выполнено 1 из 3');
+  const revised = page.getByTestId(`lesson-${lesson.id}-v2`);
+  await expect(revised).toContainText('Выполнено 0 из 3', { timeout: 4000 });
+  await expect(page.getByTestId(`lesson-${lesson.id}-v3`)).toHaveCount(0);
+  await original.click();
+  await expect(page.getByTestId('question')).toHaveText(first.question);
+  await page.getByRole('button', { name: '← К урокам' }).click();
+  await revised.click();
+  await expect(page.getByTestId('question')).toHaveText(changedQuestion);
+});
+
 test('незаполненный ручной черновик восстанавливается после офлайн-перезагрузки', async ({ page, context }) => {
   await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
   const question = 'Как меняется расписание?';
@@ -55,19 +156,7 @@ test('незаполненный ручной черновик восстана�
   await page.getByTestId('t-text').fill('Первая встреча состоится утром. Вторую встречу перенесли на вечер.');
   await page.getByRole('button', { name: 'Составить вручную' }).click();
   await page.getByTestId('t-task-0').getByPlaceholder('Вопрос').fill(question);
-  await page.waitForFunction(expected => new Promise<boolean>(resolve => {
-    const open = indexedDB.open('oqy-reader');
-    open.onerror = () => resolve(false);
-    open.onsuccess = () => {
-      const db = open.result;
-      const read = db.transaction('drafts').objectStore('drafts').get('current');
-      read.onerror = () => { db.close(); resolve(false); };
-      read.onsuccess = () => {
-        db.close();
-        resolve(read.result?.data?.tasks?.[0]?.question === expected);
-      };
-    };
-  }), question);
+  await waitForStoredQuestion(page, question);
   await context.setOffline(true);
   await page.reload();
   await page.getByTestId('mode-teacher').click();

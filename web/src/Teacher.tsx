@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { qualityWarnings, qualityWarningText, MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
-import { API_URL, getHealth, type Health } from './api';
-import { db } from './db';
+import { qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
+import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
+import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
 
 const emptyTask = (n: number, skill: Skill): Task => ({ id: `t${n}`, skill, question: '', options: [{ id: 'a', text: '' }, { id: 'b', text: '' }, { id: 'c', text: '' }], correctOptionId: 'a', evidenceSets: [[]], hint: '' });
@@ -14,7 +14,7 @@ type GenMessage =
   | { kind: 'server-down'; reason: string }
   | { kind: 'input'; errors: string[] };
 
-interface GenerateResponse { ok: boolean; kind?: string; lesson?: unknown; draft?: unknown; errors?: string[]; reason?: string; startCommand?: string; timeoutSec?: number }
+type SaveStatus = { draft: Lesson } & ({ kind: 'saved'; lesson: Lesson } | { kind: 'error' });
 
 export function Teacher() {
   const { t, lang } = useI18n();
@@ -30,8 +30,10 @@ export function Teacher() {
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [structErrors, setStructErrors] = useState<string[]>([]);
   const [genMsg, setGenMsg] = useState<GenMessage | null>(null);
-  const [saveStatus, setSaveStatus] = useState<{ kind: 'saved' | 'error'; draft: Lesson } | null>(null);
-  const [draftStorageError, setDraftStorageError] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
+  const [storageIssue, setStorageIssue] = useState<'error' | 'conflict' | null>(null);
+  const storedRevision = useRef<string | null>(null);
+  const lastQueued = useRef<{ source: DraftSource; draft: Lesson | null } | null>(null);
   const [saving, setSaving] = useState(false);
   /** Ревизия загруженного черновика: меняется при каждой загрузке извне и пересоздаёт поля редактора. */
   const [rev, setRev] = useState(0);
@@ -43,30 +45,45 @@ export function Teacher() {
     void getHealth().then((result) => { if (active) setHealth(result); });
     void db.drafts.get('current').then(
       (row) => {
-        if (!active || !row) return;
-        const restored = readStoredDraft(row.data);
-        if (!restored) {
-          setDraftStorageError(true);
-          return;
-        }
-        setText(restored.sentences.map((sentence) => sentence.text).join('\n'));
-        setTitle(restored.title);
-        setLanguage(restored.language);
-        loadDraft(restored);
+        if (!active) return;
+        const restored = readStoredDraft(row?.data);
+        if (row && row.data !== null && !restored) setStorageIssue('error');
+        const saved = row?.source;
+        const source: DraftSource = saved && typeof saved.text === 'string' && typeof saved.title === 'string'
+          && (saved.language === 'ru' || saved.language === 'kk') ? saved : {
+          text: restored?.sentences.map((sentence) => sentence.text).join('\n') ?? '',
+          title: restored?.title ?? '',
+          language: restored?.language ?? 'ru',
+        };
+        storedRevision.current = draftRevision(row);
+        lastQueued.current = { source, draft: restored };
+        setText(source.text);
+        setTitle(source.title);
+        setLanguage(source.language);
+        if (restored) loadDraft(restored);
       },
-      () => { if (active) setDraftStorageError(true); },
+      () => { if (active) setStorageIssue('error'); },
     ).finally(() => { if (active) setLoadingDraft(false); });
     return () => { active = false; abortRef.current?.abort(); };
   }, []);
   useEffect(() => {
-    if (!draft) return;
+    if (loadingDraft) return;
+    const previous = lastQueued.current;
+    if (previous?.draft === draft && previous.source.text === text
+      && previous.source.title === title && previous.source.language === language) return;
+    if (!previous && !draft && !text && !title && language === 'ru') return;
+    const source = { text, title, language };
+    lastQueued.current = { source, draft };
     let active = true;
-    void db.drafts.put({ id: 'current', data: draft, updatedAt: Date.now() }).then(
-      () => { if (active) setDraftStorageError(false); },
-      () => { if (active) setDraftStorageError(true); },
+    void persistDraft(source, draft, () => storedRevision.current).then(
+      (revision) => {
+        if (revision) storedRevision.current = revision;
+        if (active) setStorageIssue(revision ? null : 'conflict');
+      },
+      () => { if (active) setStorageIssue('error'); },
     );
     return () => { active = false; };
-  }, [draft]);
+  }, [draft, language, loadingDraft, text, title]);
   useEffect(() => {
     if (!busy) return;
     const start = Date.now();
@@ -84,12 +101,18 @@ export function Teacher() {
   const limitSec = health && 'timeoutSec' in health && health.timeoutSec ? health.timeoutSec : 600;
 
   async function generate() {
+    if (abortRef.current) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy(true); setGenMsg(null); setServerErrors([]); setStructErrors([]); setSaveStatus(null);
     try {
       const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title }), signal: ctrl.signal });
-      const body = (await r.json()) as GenerateResponse;
+      const body = readGenerateResponse(await r.json());
+      if (!body) {
+        if (r.status >= 500) setGenMsg({ kind: 'server-down', reason: `HTTP ${r.status}` });
+        else setStructErrors(['—']);
+        return;
+      }
       // Черновик меняется только при успешном или редактируемом ответе; во всех остальных случаях правки учителя остаются.
       if (body.ok && isEditableDraft(body.lesson)) loadDraft(body.lesson);
       else if ((body.kind === 'references' || body.kind === 'quality') && isEditableDraft(body.draft)) {
@@ -110,7 +133,7 @@ export function Teacher() {
   }
 
   function manualDraft() {
-    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title || t('tNewLesson'), language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
+    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || t('tNewLesson'), language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
   const updTask = (i: number, patch: Partial<Task>) => setDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
@@ -128,28 +151,20 @@ export function Teacher() {
     setSaving(true);
     setSaveStatus(null);
     try {
-      await db.lessons.put({ id: validation.lesson.id, lesson: validation.lesson, source: 'teacher', addedAt: Date.now() });
-      setSaveStatus({ kind: 'saved', draft });
+      const saved = await saveTeacherLesson(validation.lesson);
+      setSaveStatus({ kind: 'saved', draft, lesson: saved.lesson });
     } catch {
       setSaveStatus({ kind: 'error', draft });
     } finally {
       setSaving(false);
     }
   }
-  async function deleteDraft() {
-    try {
-      await db.drafts.delete('current');
-      setDraft(null);
-      setDraftStorageError(false);
-    } catch {
-      setDraftStorageError(true);
-    }
-  }
   function exportJson() {
     if (!canSave || !validation?.ok) return;
-    const blob = new Blob([JSON.stringify(validation.lesson, null, 2)], { type: 'application/json' });
+    const lesson = saveStatus?.draft === draft && saveStatus.kind === 'saved' ? saveStatus.lesson : validation.lesson;
+    const blob = new Blob([JSON.stringify(lesson, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `${validation.lesson.id}.json`; a.rel = 'noopener';
+    a.href = URL.createObjectURL(blob); a.download = `${lesson.id}.json`; a.rel = 'noopener';
     // Ссылка должна быть в DOM: мобильный Chrome игнорирует click() по неприкреплённой ссылке.
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
@@ -181,6 +196,9 @@ export function Teacher() {
           );
         })}
       </ol>
+      {storageIssue && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-draft-storage-error">
+        {t(storageIssue === 'conflict' ? 'tDraftConflict' : 'tDraftStorageError')}
+      </p>}
 
       <section id="t-step-1" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-1-title">
         <StepTitle n={1} id="t-step-1-title">{t('tText')}</StepTitle>
@@ -204,7 +222,7 @@ export function Teacher() {
         </div>
         <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={loadingDraft || busy || sentences.length < MIN_SENTENCES} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
+          <button className="btn" disabled={loadingDraft || busy || !hasEnoughReadingText(sentences)} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
           {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
           {busy && (
             <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">
@@ -313,11 +331,12 @@ export function Teacher() {
         <div className="flex flex-wrap gap-2">
           <button className="btn" disabled={!canSave || saving} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
           <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
-          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => void deleteDraft()}>{t('tDelete')}</button>}
+          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => setDraft(null)}>{t('tDelete')}</button>}
         </div>
-        {draftStorageError && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert">{t('tDraftStorageError')}</p>}
         {saveStatus?.draft === draft && saveStatus.kind === 'error' && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-save-error">{t('tSaveError')}</p>}
-        {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">✓ {t('tSaved')}</p>}
+        {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">
+          ✓ {saveStatus.lesson.id === draft.id ? t('tSaved') : t('tSavedVersion', { title: saveStatus.lesson.title })}
+        </p>}
       </section>
     </div>
   );

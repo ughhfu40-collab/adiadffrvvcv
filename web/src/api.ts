@@ -15,6 +15,22 @@ const HealthSchema = z.object({
 });
 export type Health = z.infer<typeof HealthSchema>;
 
+const GenerateResponseSchema = z.object({
+  ok: z.boolean(),
+  kind: z.string().optional(),
+  lesson: z.unknown().optional(),
+  draft: z.unknown().optional(),
+  errors: z.array(z.string()).optional(),
+  reason: z.string().optional(),
+  startCommand: z.string().optional(),
+  timeoutSec: z.number().nonnegative().optional(),
+});
+
+export function readGenerateResponse(body: unknown) {
+  const result = GenerateResponseSchema.safeParse(body);
+  return result.success ? result.data : null;
+}
+
 export async function getHealth(): Promise<Health | { error: string }> {
   try {
     const r = await fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(3000) });

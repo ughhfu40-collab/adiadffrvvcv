@@ -1,10 +1,11 @@
 import Dexie, { type Table } from 'dexie';
-import type { Lesson, Skill } from '../../shared/lesson';
+import type { Language, Lesson, Skill } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 
 export interface LessonRow { id: string; lesson: Lesson; source: 'builtin' | 'imported' | 'teacher'; addedAt: number }
 export interface AttemptRow { id?: number; lessonId: string; taskId: string; skill: Skill; optionId: string | null; evidence: string[]; answerCorrect: boolean; evidenceOk: boolean; solved: boolean; at: number }
-export interface DraftRow { id: string; data: unknown; updatedAt: number }
+export interface DraftSource { text: string; title: string; language: Language }
+export interface DraftRow { id: string; data: unknown; updatedAt: number; source?: DraftSource; revision?: string }
 
 export class AppDB extends Dexie {
   lessons!: Table<LessonRow, string>;
@@ -17,6 +18,23 @@ export class AppDB extends Dexie {
 }
 
 export const db = new AppDB();
+
+export function draftRevision(row: DraftRow | undefined) {
+  return row ? row.revision ?? `legacy-${row.updatedAt}` : null;
+}
+
+/** The editor saves only over the revision it last read or committed. */
+export async function persistDraft(
+  source: DraftSource, draft: Lesson | null, expected: () => string | null,
+): Promise<string | null> {
+  return db.transaction('rw', db.drafts, async () => {
+    const current = await db.drafts.get('current');
+    if (draftRevision(current) !== expected()) return null;
+    const revision = Array.from(crypto.getRandomValues(new Uint32Array(2))).join('-');
+    await db.drafts.put({ id: 'current', data: draft, source, revision, updatedAt: Date.now() });
+    return revision;
+  });
+}
 
 export async function seedBuiltins(d: AppDB = db) {
   await d.lessons.bulkPut(BUILTIN_LESSONS.map((lesson) => ({ id: lesson.id, lesson, source: 'builtin' as const, addedAt: 0 })));
@@ -52,11 +70,19 @@ const stable = (v: unknown): string => JSON.stringify(v, (_k, x: unknown) =>
 /** Импорт без потерь: существующий урок (и прогресс по его ID) никогда не перезаписывается.
  *  Проверка ID и запись — одна rw-транзакция Dexie: одновременные импорты с одним ID выполняются по очереди,
  *  и второй гарантированно увидит первый. */
-export async function importLesson(lesson: Lesson, d: AppDB = db): Promise<ImportOutcome> {
+export function importLesson(lesson: Lesson, d: AppDB = db): Promise<ImportOutcome> {
+  return storeLesson(lesson, 'imported', d);
+}
+
+export function saveTeacherLesson(lesson: Lesson, d: AppDB = db): Promise<ImportOutcome> {
+  return storeLesson(lesson, 'teacher', d);
+}
+
+async function storeLesson(lesson: Lesson, source: 'imported' | 'teacher', d: AppDB): Promise<ImportOutcome> {
   return d.transaction('rw', d.lessons, async (): Promise<ImportOutcome> => {
     const existing = await d.lessons.get(lesson.id);
     if (!existing) {
-      await d.lessons.add({ id: lesson.id, lesson, source: 'imported', addedAt: Date.now() });
+      await d.lessons.add({ id: lesson.id, lesson, source, addedAt: Date.now() });
       return { status: 'new', lesson };
     }
     if (stable(existing.lesson) === stable(lesson)) return { status: 'same', lesson: existing.lesson };
@@ -66,7 +92,7 @@ export async function importLesson(lesson: Lesson, d: AppDB = db): Promise<Impor
       if (!other) {
         const copy: Lesson = { ...lesson, id, title: `${lesson.title} (v${n})` };
         // add, а не put: если ID внезапно занят, транзакция упадёт, а не перезапишет урок.
-        await d.lessons.add({ id, lesson: copy, source: 'imported', addedAt: Date.now() });
+        await d.lessons.add({ id, lesson: copy, source, addedAt: Date.now() });
         return { status: 'renamed', lesson: copy, originalId: lesson.id };
       }
       // Копия уже есть, только если совпадает всё, включая название (с пометкой vN).

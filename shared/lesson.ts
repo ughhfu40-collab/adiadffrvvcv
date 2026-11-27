@@ -11,32 +11,34 @@ export const SKILL_LABELS: Record<Language, Record<Skill, string>> = {
   kk: { find: 'Деректі табу', match: 'Мәліметтерді салыстыру', infer: 'Қорытынды жасау' },
 };
 
+const NonBlankText = z.string().refine((value) => value.trim().length > 0, 'Поле не должно быть пустым');
+
 export const SentenceSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'ID: латиница, цифры, дефис'),
-  text: z.string().min(1),
+  text: NonBlankText,
 });
 
 export const OptionSchema = z.object({
   id: z.string().min(1),
-  text: z.string().min(1),
+  text: NonBlankText,
 });
 
 export const TaskSchema = z.object({
   id: z.string().min(1),
   skill: SkillSchema,
-  question: z.string().min(1),
+  question: NonBlankText,
   options: z.array(OptionSchema).min(2).max(6),
   correctOptionId: z.string().min(1),
   /** Каждый элемент — допустимый набор ID предложений-доказательств. */
   evidenceSets: z.array(z.array(z.string().min(1)).min(1)).min(1),
-  hint: z.string().min(1),
+  hint: NonBlankText,
 });
 export type Task = z.infer<typeof TaskSchema>;
 
 /** Только структура, без ссылочной проверки — для редактируемых черновиков. */
 export const LessonBaseSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
-  title: z.string().min(1),
+  title: NonBlankText,
   language: LanguageSchema,
   grade: z.number().int().min(7).max(9),
   sentences: z.array(SentenceSchema).min(2),
@@ -115,8 +117,15 @@ export function parseLessonJson(raw: string): ValidationResult {
 /** Разбивка текста на пронумерованные предложения со стабильными ID s1, s2, ... */
 export function splitSentences(text: string): { id: string; text: string }[] {
   const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return [];
-  const parts = normalized.match(/[^.!?…]+(?:[.!?…]+["»”)]*|$)/g) ?? [normalized];
+  const parts: string[] = [];
+  let start = 0;
+  for (const { 0: punctuation, index } of normalized.matchAll(/[.!?…]+["»”)]*/g)) {
+    if (punctuation === '.' && /\d/.test(normalized[index - 1] ?? '') && /\d/.test(normalized[index + 1] ?? '')) continue;
+    const end = index + punctuation.length;
+    parts.push(normalized.slice(start, end));
+    start = end;
+  }
+  parts.push(normalized.slice(start));
   return parts
     .map((p) => p.trim())
     // Фрагменты без букв и цифр («...», « . ») — не предложения.
@@ -126,6 +135,10 @@ export function splitSentences(text: string): { id: string; text: string }[] {
 
 /** Минимум для генерации: три предложения с буквами. Проверяется и в интерфейсе, и на сервере до вызова модели. */
 export const MIN_SENTENCES = 3;
+
+export function hasEnoughReadingText(sentences: { text: string }[]): boolean {
+  return sentences.filter(({ text }) => /\p{L}/u.test(text)).length >= MIN_SENTENCES;
+}
 
 // ---------- Проверка ответа ----------
 
