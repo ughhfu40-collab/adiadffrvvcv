@@ -1,6 +1,6 @@
 // «Графики» в разделе «Математика»: построить самому (до трёх функций) и задание про два тарифа.
 // Формулы разбираются собственным парсером (shared/graphExpr.ts), всё хранится локально и работает офлайн.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { compile, intersectNear, niceStep, parseErrorText, sample, sameFunction, type AngleMode, type View } from '../../shared/graphExpr';
 import type { Language } from '../../shared/lesson';
 import { nbspNumbers } from '../../shared/math';
@@ -260,12 +260,21 @@ function FuncList({ funcs, compiled, onChange, prefix, allowAdd = true }: { func
   const t = TEXT[lang];
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const [focus, setFocus] = useState(0);
+  // Курсор после вставки ставится сразу после обновления поля (до следующего ввода): с requestAnimationFrame
+  // на медленном устройстве быстрый набор успевал раньше, и курсор отскакивал назад («sin()x»).
+  const caret = useRef<{ i: number; pos: number } | null>(null);
+  useLayoutEffect(() => {
+    const c = caret.current; if (!c) return;
+    caret.current = null;
+    const el = inputs.current[c.i]; if (!el) return;
+    el.focus(); el.setSelectionRange(c.pos, c.pos);
+  });
   const set = (i: number, patch: Partial<Func>) => onChange(funcs.map((f, k) => (k === i ? { ...f, ...patch } : f)));
   function insert(text: string) {
     const el = inputs.current[focus]; const cur = funcs[focus]; if (!cur) return;
     const at = el?.selectionStart ?? cur.expr.length, end = el?.selectionEnd ?? at;
+    caret.current = { i: focus, pos: at + text.length };
     set(focus, { expr: cur.expr.slice(0, at) + text + cur.expr.slice(end) });
-    requestAnimationFrame(() => { el?.focus(); const p = at + text.length; el?.setSelectionRange(p, p); });
   }
   return (
     <div className="space-y-3">

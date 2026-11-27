@@ -115,3 +115,19 @@ test('«Графики» на казахском', async ({ page }) => {
   await page.getByTestId('tk-f-0').fill('(x');
   await expect(page.getByTestId('tk-err-0')).toContainText('Жабатын');
 });
+
+test('кнопка функции на медленном устройстве: курсор встаёт внутрь скобки, быстрый ввод не ломает формулу', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'замедление процессора через CDP — только Chromium');
+  await openGraphs(page);
+  await page.getByTestId('graph-mode-free').click();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  for (const key of ['sin', 'cos', '√']) {
+    await page.getByTestId('g-f-1').fill('');
+    await page.getByTestId('g-f-1').click();
+    await page.getByTestId(`g-key-${key}`).click();
+    await page.keyboard.type('x)', { delay: 0 });
+    await expect(page.getByTestId('g-f-1')).toHaveValue(`${key}(x)`);
+  }
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+});
