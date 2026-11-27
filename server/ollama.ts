@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { splitBySubject, type Subject } from '../shared/math';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_GRADE, DEFAULT_LESSON_TITLE, qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Grade, type Lesson } from '../shared/lesson';
 
@@ -15,6 +16,18 @@ const DraftSchema = z.object({ tasks: z.array(TaskSchema).min(1) });
 const OllamaChatSchema = z.object({ message: z.object({ content: z.string().trim().min(1) }) });
 
 /** JSON Schema для structured outputs Ollama (format). */
+const CALC_JSON = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['value', 'choose'] },
+    expr: { type: 'string' },
+    pick: { type: 'string', enum: ['min', 'max'] },
+    values: { type: 'object', additionalProperties: { type: 'string' } },
+    unit: { type: 'string' },
+  },
+  required: ['kind', 'unit'],
+} as const;
+
 export const DRAFT_JSON_SCHEMA = {
   type: 'object',
   properties: {
@@ -40,6 +53,58 @@ export const DRAFT_JSON_SCHEMA = {
   },
   required: ['tasks'],
 } as const;
+
+/** Схема черновика математики: те же поля плюс объяснение расчёта и формула, которую проверит код. */
+export const MATH_DRAFT_JSON_SCHEMA = {
+  ...DRAFT_JSON_SCHEMA,
+  properties: { tasks: { ...DRAFT_JSON_SCHEMA.properties.tasks, items: {
+    ...DRAFT_JSON_SCHEMA.properties.tasks.items,
+    properties: { ...DRAFT_JSON_SCHEMA.properties.tasks.items.properties, solution: { type: 'string' }, calc: CALC_JSON },
+    required: [...DRAFT_JSON_SCHEMA.properties.tasks.items.required, 'solution', 'calc'],
+  } } },
+} as const;
+
+const MATH_EXAMPLE: Record<Language, string> = {
+  ru: [
+    'Пример (другая ситуация, только для образца):',
+    's1: В классе 25 учеников.',
+    's2: Тетрадь стоит 150 ₸, а пачка из 5 тетрадей — 600 ₸.',
+    's3: Класс собрал 4 000 ₸.',
+    JSON.stringify({ id: 't2', skill: 'match', question: 'Сколько стоят тетради на весь класс, если покупать пачками?', options: [{ id: 'a', text: '3 000 ₸' }, { id: 'b', text: '3 750 ₸' }, { id: 'c', text: '600 ₸' }], correctOptionId: 'a', evidenceSets: [['s1', 's2']], hint: 'Узнай, сколько пачек нужно на 25 учеников.', solution: '25 : 5 = 5 пачек; 5 × 600 ₸ = 3 000 ₸.', calc: { kind: 'value', expr: '25/5*600', unit: '₸' } }),
+  ].join('\n'),
+  kk: [
+    'Мысал (басқа жағдай, тек үлгі үшін):',
+    's1: Сыныпта 25 оқушы бар.',
+    's2: Дәптер 150 ₸, ал 5 дәптерден тұратын бума — 600 ₸.',
+    's3: Сынып 4 000 ₸ жинады.',
+    JSON.stringify({ id: 't2', skill: 'match', question: 'Бумамен алса, бүкіл сыныпқа дәптер қанша тұрады?', options: [{ id: 'a', text: '3 000 ₸' }, { id: 'b', text: '3 750 ₸' }, { id: 'c', text: '600 ₸' }], correctOptionId: 'a', evidenceSets: [['s1', 's2']], hint: '25 оқушыға неше бума керек екенін тап.', solution: '25 : 5 = 5 бума; 5 × 600 ₸ = 3 000 ₸.', calc: { kind: 'value', expr: '25/5*600', unit: '₸' } }),
+  ].join('\n'),
+};
+
+/** Промпт математики: бытовая задача по условиям учителя, исходные данные — строки s1…sN. */
+export function buildMathPrompt(language: Language, lines: { id: string; text: string }[], grade: Grade = DEFAULT_GRADE): string {
+  const langName = language === 'kk' ? 'казахском (қазақ тілі)' : 'русском';
+  return [
+    `Ты методист по математической (функциональной) грамотности для ${grade} класса. Составь ровно 3 задания на ${langName} языке по бытовой ситуации ниже — по одному каждого типа.`,
+    'Задание t1: skill="find" — найти одно исходное данное из одной строки (evidenceSets — одна строка).',
+    'Задание t2: skill="match" — посчитать результат по данным минимум из ДВУХ разных строк.',
+    'Задание t3: skill="infer" — выбрать лучший вариант (дешевле, выгоднее, хватит ли) и обосновать расчётом; минимум ДВЕ строки данных.',
+    'У каждого задания 3 варианта ответа с id "a","b","c", ровно один верный. Числа в ответах — с единицами измерения (₸, ГБ, л, кг, шт.).',
+    'Неверные варианты — типичные ошибки расчёта (забыли условие скидки, не учли доставку, посчитали не всех), но с ДРУГИМ числом, чем верный.',
+    'evidenceSets — ID строк с исходными данными, без которых ответ не получить. Используй ТОЛЬКО ID из условия.',
+    'hint — какую величину нужно найти, без готового ответа. solution — короткий расчёт с единицами.',
+    'calc — формула для проверки кодом, ТОЛЬКО числа, + - * / и скобки:',
+    '  {"kind":"value","expr":"25/5*600","unit":"₸"} — число результата должно быть в тексте верного варианта;',
+    '  {"kind":"choose","pick":"min","values":{"a":"…","b":"…"},"unit":"₸"} — для выбора: формула каждого сравниваемого варианта, верный — с минимумом (или максимумом).',
+    '',
+    MATH_EXAMPLE[language],
+    '',
+    'Условие (ID: строка):',
+    ...lines.map((s) => `${s.id}: ${s.text}`),
+  ].join('\n');
+}
+
+
 
 const MATCH_EXAMPLE: Record<Language, { sentences: string[]; task: object; bad: string; why: string; badWhy: string; check: string }> = {
   kk: {
@@ -128,12 +193,14 @@ export type GenerateResult =
   | { ok: false; kind: 'quality'; errors: string[]; issues: QualityIssue[]; draft: Lesson };
 
 /** Собирает урок из ответа модели и проверяет общей схемой (ID предложений, ссылки на варианты). */
-export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language; grade?: Grade }, sentences: { id: string; text: string }[]): GenerateResult {
+export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language; grade?: Grade; subject?: Subject }, sentences: { id: string; text: string }[]): GenerateResult {
   const parsed = DraftSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, kind: 'structure', errors: ['Модель вернула черновик неверной структуры', ...formatIssues(parsed.error)] };
   }
-  const candidate = { ...meta, grade: meta.grade ?? DEFAULT_GRADE, sentences, tasks: parsed.data.tasks };
+  const { subject, ...rest } = meta;
+  // Поле subject пишется только для математики: старые читательские уроки остаются как были.
+  const candidate = { ...rest, ...(subject === 'math' ? { subject } : {}), grade: meta.grade ?? DEFAULT_GRADE, sentences, tasks: parsed.data.tasks };
   const base = LessonBaseSchema.safeParse(candidate);
   if (!base.success) return { ok: false, kind: 'structure', errors: ['Черновик не соответствует схеме урока', ...formatIssues(base.error)] };
   const full = LessonSchema.safeParse(candidate);
@@ -173,12 +240,14 @@ export async function callModelJson(prompt: string, format: object, fetchImpl: t
   }
 }
 
-export async function generateLesson(input: { text: string; language: Language; title: string; grade?: Grade }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
-  const sentences = splitSentences(input.text);
+export async function generateLesson(input: { text: string; language: Language; title: string; grade?: Grade; subject?: Subject }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
+  const subject = input.subject ?? 'reading';
+  const sentences = splitBySubject(subject, input.text, splitSentences);
   const grade = input.grade ?? DEFAULT_GRADE;
-  const r = await callModelJson(buildPrompt(input.language, sentences, grade), DRAFT_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
+  const prompt = subject === 'math' ? buildMathPrompt(input.language, sentences, grade) : buildPrompt(input.language, sentences, grade);
+  const r = await callModelJson(prompt, subject === 'math' ? MATH_DRAFT_JSON_SCHEMA : DRAFT_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
   if (!r.ok) return r;
   // Время + случайный суффикс: параллельные запросы в одну миллисекунду получают разные ID.
-  const slug = `gen-${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  return assembleDraft(r.data, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language, grade }, sentences);
+  const slug = `gen-${subject === 'math' ? 'math-' : ''}${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  return assembleDraft(r.data, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language, grade, subject }, sentences);
 }

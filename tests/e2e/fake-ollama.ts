@@ -31,8 +31,21 @@ function reviewOrRepair(full: string): unknown | null {
   return null;
 }
 
+/** Математика: задача с формулами для проверки кодом; МАРКЕР-CALC-BAD — верный вариант не совпадает с расчётом. */
+function mathDraft(full: string): unknown | null {
+  if (!full.includes('математической (функциональной) грамотности')) return null;
+  const text = full.slice(full.lastIndexOf('Условие (ID: строка):'));
+  const bad = text.includes('МАРКЕР-CALC-BAD');
+  const opt = (a: string, b: string, c: string) => [{ id: 'a', text: a }, { id: 'b', text: b }, { id: 'c', text: c }];
+  return { tasks: [
+    { id: 't1', skill: 'find', question: 'Сколько стоит билет?', options: opt('600 ₸', '500 ₸', '700 ₸'), correctOptionId: 'a', evidenceSets: [['s1']], hint: 'Найди строку про билет.', solution: 'Билет — 600 ₸.', calc: { kind: 'value', expr: '600', unit: '₸' } },
+    { id: 't2', skill: 'match', question: 'Сколько стоят билеты на всех?', options: opt(bad ? '9 000 ₸' : '6 000 ₸', '5 400 ₸', '600 ₸'), correctOptionId: 'a', evidenceSets: [['s1', 's2']], hint: 'Нужны цена билета и число учеников.', solution: '10 × 600 ₸ = 6 000 ₸.', calc: { kind: 'value', expr: '10*600', unit: '₸' } },
+    { id: 't3', skill: 'infer', question: 'Как дешевле?', options: opt('Автобус — 6 000 ₸', 'Такси — 8 000 ₸', 'Одинаково'), correctOptionId: 'a', evidenceSets: [['s2', 's3']], hint: 'Сравни полную стоимость.', solution: 'Автобус 6 000 ₸ < такси 8 000 ₸.', calc: { kind: 'choose', pick: 'min', values: { a: '6000', b: '2*4000' }, unit: '₸' } },
+  ] };
+}
+
 function reply(full: string): unknown {
-  const special = reviewOrRepair(full);
+  const special = reviewOrRepair(full) ?? mathDraft(full);
   if (special) return special;
   const prompt = full.slice(full.lastIndexOf('Текст (ID: предложение):'));
   const ids = [...prompt.matchAll(/^(s\d+): /gm)].map((m) => m[1]!);

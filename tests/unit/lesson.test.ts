@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkAnswer, feedbackParts, feedbackText, parseLessonJson, LessonSchema, recommendNext, splitSentences, validateLesson, type Lesson } from '../../shared/lesson';
 import pitchKk from '../../docs/pitch/lesson-kk-after-teacher.json';
+import { subjectOf, evaluateExpr, checkCalc, numbersIn } from '../../shared/math';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 
 const saiga = BUILTIN_LESSONS.find((l) => l.id === 'ru-saiga')!;
@@ -29,12 +30,14 @@ it('десятичная точка не разбивает предложени
 });
 
 describe('встроенные уроки', () => {
-  it('8 уроков, на обоих языках для каждого класса, по 3 задания', () => {
-    expect(BUILTIN_LESSONS).toHaveLength(8);
-    for (const grade of [7, 8, 9]) {
-      for (const language of ['kk', 'ru']) {
-        expect(BUILTIN_LESSONS.filter((l) => l.grade === grade && l.language === language)).toHaveLength(grade === 8 ? 2 : 1);
-      }
+  it('чтение: 8 уроков; математика: 6 уроков — kk и ru на каждый класс 7–9, по 3 задания', () => {
+    const reading = BUILTIN_LESSONS.filter((l) => subjectOf(l) === 'reading');
+    const math = BUILTIN_LESSONS.filter((l) => subjectOf(l) === 'math');
+    expect(reading).toHaveLength(8);
+    expect(math).toHaveLength(6);
+    for (const grade of [7, 8, 9]) for (const language of ['kk', 'ru']) {
+      expect(reading.filter((l) => l.grade === grade && l.language === language)).toHaveLength(grade === 8 ? 2 : 1);
+      expect(math.filter((l) => l.grade === grade && l.language === language)).toHaveLength(1);
     }
     for (const l of BUILTIN_LESSONS) expect(l.tasks.map((t) => t.skill)).toEqual(['find', 'match', 'infer']);
   });
@@ -204,5 +207,40 @@ describe('ошибки импорта JSON — по-русски, без тех�
       expect(r.ok).toBe(false);
       if (!r.ok) for (const e of r.errors) expect(e, e).not.toMatch(/Invalid|expected|received|Too (big|small)/);
     }
+  });
+});
+
+describe('математика: вычислитель и проверка расчёта кодом', () => {
+  it('вычислитель: приоритет, скобки, запятая, × и ÷; мусор и деление на 0 — null', () => {
+    expect(evaluateExpr('35000-18000-24*600')).toBe(2600);
+    expect(evaluateExpr('(8 − 5) × 400 + 1500')).toBe(2700);
+    expect(evaluateExpr('30*280*0,85')).toBeCloseTo(7140);
+    expect(evaluateExpr('24 ÷ 4 × 1000')).toBe(6000);
+    expect(evaluateExpr('-(2+3)')).toBe(-5);
+    for (const bad of ['', '2+', 'alert(1)', '1/0', '2**3', '(1+2', 'process.exit()']) expect(evaluateExpr(bad), bad).toBeNull();
+  });
+  it('числа в вариантах: пробел-разделитель тысяч, запятая', () => {
+    expect(numbersIn('«Старт», 2 700 ₸')).toEqual([2700]);
+    expect(numbersIn('12,5 л и 1 200 ₸')).toEqual([12.5, 1200]);
+  });
+  it('все встроенные математические задания: расчёт сходится с верным вариантом и единственен', () => {
+    for (const l of BUILTIN_LESSONS.filter((x) => subjectOf(x) === 'math')) for (const t of l.tasks) {
+      expect(t.calc, `${l.id}/${t.id}`).toBeTruthy();
+      expect(t.solution, `${l.id}/${t.id}`).toMatch(/₸|ГБ/);
+      expect(checkCalc(t), `${l.id}/${t.id}`).toMatchObject({ ok: true });
+    }
+  });
+  it('расхождение, неверный выбор, ничья и совпадение с неверным вариантом — ошибки качества', () => {
+    const base = { options: [{ id: 'a', text: '2 600 ₸' }, { id: 'b', text: '1 400 ₸' }], correctOptionId: 'a' };
+    expect(checkCalc({ ...base, calc: { kind: 'value', expr: '1000+400', unit: '₸' } })).toMatchObject({ ok: false, reason: 'mismatch' });
+    expect(checkCalc({ ...base, options: [{ id: 'a', text: '2 600 ₸' }, { id: 'b', text: 'тоже 2 600 ₸' }], calc: { kind: 'value', expr: '2600', unit: '₸' } })).toMatchObject({ ok: false, reason: 'ambiguous' });
+    expect(checkCalc({ ...base, calc: { kind: 'choose', pick: 'min', values: { a: '5', b: '3' }, unit: '' } })).toMatchObject({ ok: false, reason: 'wrong-choice', expectedOptionId: 'b' });
+    expect(checkCalc({ ...base, calc: { kind: 'choose', pick: 'min', values: { a: '3', b: '3' }, unit: '' } })).toMatchObject({ ok: false, reason: 'wrong-choice', expectedOptionId: '—' });
+    expect(checkCalc({ ...base, calc: { kind: 'value', expr: '2600+', unit: '' } })).toMatchObject({ ok: false, reason: 'bad-expr' });
+  });
+  it('старый урок без subject — «Чтение»', () => {
+    const old = structuredClone(BUILTIN_LESSONS.find((l) => l.id === 'ru-saiga')!) as Record<string, unknown>;
+    delete old.subject;
+    expect(subjectOf(old as { subject?: 'reading' | 'math' })).toBe('reading');
   });
 });

@@ -2,18 +2,24 @@ import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
 import { reviewLesson, repairTask } from './review';
+import { splitBySubject, SubjectSchema } from '../shared/math';
 import { DEFAULT_GRADE, GradeSchema, hasEnoughReadingText, LessonSchema, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
 const GenerateBody = z.object({
   text: z.string({ error: 'Нужен текст (строка)' }).trim()
     .min(20, { error: 'Текст слишком короткий (нужно от 20 символов)', abort: true })
-    .max(MAX_TEXT_CHARS, { error: `Текст слишком длинный (не больше ${MAX_TEXT_CHARS} символов)`, abort: true })
-    .refine((t) => hasEnoughReadingText(splitSentences(t)), `Нужно минимум ${MIN_SENTENCES} предложения с буквами`)
-    .refine((t) => splitSentences(t).length <= MAX_SENTENCES, `Слишком много предложений (не больше ${MAX_SENTENCES})`),
+    .max(MAX_TEXT_CHARS, { error: `Текст слишком длинный (не больше ${MAX_TEXT_CHARS} символов)`, abort: true }),
   language: z.enum(['kk', 'ru'], { error: 'Язык урока: kk или ru' }),
   grade: GradeSchema.default(DEFAULT_GRADE),
+  /** Раздел: чтение (по умолчанию) или математика — от него зависит разбивка текста и промпт. */
+  subject: SubjectSchema.default('reading'),
   title: z.string({ error: 'Название — строка' }).trim().max(120, 'Название слишком длинное (не больше 120 символов)').default(''),
+}).superRefine((b, ctx) => {
+  // Чтение — предложения, математика — строки данных; минимум 3 с буквами, не больше MAX_SENTENCES.
+  const parts = splitBySubject(b.subject, b.text, splitSentences);
+  if (!hasEnoughReadingText(parts)) ctx.addIssue({ code: 'custom', path: ['text'], message: b.subject === 'math' ? `Нужно минимум ${MIN_SENTENCES} строки с данными` : `Нужно минимум ${MIN_SENTENCES} предложения с буквами` });
+  else if (parts.length > MAX_SENTENCES) ctx.addIssue({ code: 'custom', path: ['text'], message: b.subject === 'math' ? `Слишком много строк (не больше ${MAX_SENTENCES})` : `Слишком много предложений (не больше ${MAX_SENTENCES})` });
 });
 
 const HTTP_INPUT_ERRORS: Record<number, string> = {

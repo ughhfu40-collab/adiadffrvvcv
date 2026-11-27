@@ -1,10 +1,11 @@
 import Dexie, { type Table } from 'dexie';
 import type { Grade, Language, Lesson, Skill } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
+import { subjectOf, type Subject } from '../../shared/math';
 
 export interface LessonRow { id: string; lesson: Lesson; source: 'builtin' | 'imported' | 'teacher'; addedAt: number }
 export interface AttemptRow { id?: number; lessonId: string; taskId: string; skill: Skill; optionId: string | null; evidence: string[]; answerCorrect: boolean; evidenceOk: boolean; solved: boolean; at: number }
-export interface DraftSource { text: string; title: string; language: Language; grade?: Grade }
+export interface DraftSource { text: string; title: string; language: Language; grade?: Grade; subject?: Subject }
 export interface DraftRow { id: string; data: unknown; updatedAt: number; source?: DraftSource; revision?: string }
 
 export class AppDB extends Dexie {
@@ -46,21 +47,33 @@ export async function seedBuiltins(d: AppDB = db) {
 }
 
 export interface SkillStats { attempts: number; solved: number; errors: number }
+const emptySkills = (): Record<Skill, SkillStats> => ({ find: { attempts: 0, solved: 0, errors: 0 }, match: { attempts: 0, solved: 0, errors: 0 }, infer: { attempts: 0, solved: 0, errors: 0 } });
+
+/** Прогресс по навыкам: всего и отдельно по разделам «Чтение» и «Математика» (раздел урока берётся из таблицы уроков). */
 export async function readProgress(d: AppDB = db) {
-  const skills: Record<Skill, SkillStats> = { find: { attempts: 0, solved: 0, errors: 0 }, match: { attempts: 0, solved: 0, errors: 0 }, infer: { attempts: 0, solved: 0, errors: 0 } };
+  const skills = emptySkills();
+  const bySubject: Record<Subject, Record<Skill, SkillStats>> = { reading: emptySkills(), math: emptySkills() };
   const solved = new Set<string>();
-  const solvedBySkill: Record<Skill, Set<string>> = { find: new Set(), match: new Set(), infer: new Set() };
+  const solvedBy = new Map<string, Set<string>>();
+  const subjectByLesson = new Map((await d.lessons.toArray()).map((row) => [row.id, subjectOf(row.lesson)] as const));
   for (const a of await d.attempts.toArray()) {
-    const stats = skills[a.skill];
-    stats.attempts++;
-    if (a.solved) {
-      const key = `${a.lessonId}/${a.taskId}`;
-      solved.add(key);
-      solvedBySkill[a.skill].add(key);
-    } else stats.errors++;
+    const subject = subjectByLesson.get(a.lessonId) ?? 'reading';
+    for (const [key, stats] of [['all', skills[a.skill]], [subject, bySubject[subject][a.skill]]] as const) {
+      stats.attempts++;
+      if (a.solved) {
+        const k = `${a.lessonId}/${a.taskId}`;
+        if (key === 'all') solved.add(k);
+        const bucket = `${key}|${a.skill}`;
+        if (!solvedBy.has(bucket)) solvedBy.set(bucket, new Set());
+        solvedBy.get(bucket)!.add(k);
+      } else stats.errors++;
+    }
   }
-  for (const skill of ['find', 'match', 'infer'] as const) skills[skill].solved = solvedBySkill[skill].size;
-  return { skills, solved };
+  for (const skill of ['find', 'match', 'infer'] as const) {
+    skills[skill].solved = solvedBy.get(`all|${skill}`)?.size ?? 0;
+    for (const subject of ['reading', 'math'] as const) bySubject[subject][skill].solved = solvedBy.get(`${subject}|${skill}`)?.size ?? 0;
+  }
+  return { skills, bySubject, solved };
 }
 
 export async function solvedKeys(d: AppDB = db): Promise<Set<string>> {

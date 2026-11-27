@@ -3,6 +3,7 @@ import { DEFAULT_GRADE, DEFAULT_LESSON_TITLE, GRADES, GradeSchema, MAX_SENTENCES
 import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
+import { checkCalc, splitBySubject, subjectOf, type Calc, type Subject } from '../../shared/math';
 import { AiReviewBar, AiTaskNote, useAiReview } from './AiReview';
 import { Icon, Spinner } from './Icon';
 
@@ -31,6 +32,7 @@ export function Teacher() {
   const [text, setText] = useState('');
   const [language, setLanguage] = useState<Language>('ru');
   const [grade, setGrade] = useState<Grade>(DEFAULT_GRADE);
+  const [subject, setSubject] = useState<Subject>('reading');
   const [title, setTitle] = useState('');
   const [health, setHealth] = useState<Health | { error: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,7 +58,8 @@ export function Teacher() {
     setDraft(value);
   };
   const loadDraft = (d: Lesson) => { updateDraft(d); setRev((r) => r + 1); };
-  const sentences = useMemo(() => splitSentences(text), [text]);
+  // Чтение — по предложениям, математика — каждая строка условия отдельно (числа с точкой не разрываются).
+  const sentences = useMemo(() => splitBySubject(subject, text, splitSentences), [subject, text]);
   const tooLong = text.trim().length > MAX_TEXT_CHARS || sentences.length > MAX_SENTENCES;
 
   useEffect(() => {
@@ -80,6 +83,7 @@ export function Teacher() {
         setTitle(source.title);
         setLanguage(source.language);
         setGrade(GradeSchema.safeParse(source.grade).data ?? restored?.grade ?? DEFAULT_GRADE);
+        setSubject(source.subject ?? (restored ? subjectOf(restored) : 'reading'));
         if (restored) loadDraft(restored);
       },
       () => { if (active) setStorageIssue('error'); },
@@ -91,9 +95,9 @@ export function Teacher() {
     const previous = lastQueued.current;
     if (previous?.draft === draft && previous.source.text === text
       && previous.source.title === title && previous.source.language === language
-      && (previous.source.grade ?? draft?.grade ?? DEFAULT_GRADE) === grade) return;
-    if (!previous && !draft && !text && !title && language === 'ru' && grade === DEFAULT_GRADE) return;
-    const source = { text, title, language, grade };
+      && (previous.source.grade ?? draft?.grade ?? DEFAULT_GRADE) === grade && (previous.source.subject ?? 'reading') === subject) return;
+    if (!previous && !draft && !text && !title && language === 'ru' && grade === DEFAULT_GRADE && subject === 'reading') return;
+    const source = { text, title, language, grade, subject };
     lastQueued.current = { source, draft };
     let active = true;
     void persistDraft(source, draft, () => storedRevision.current).then(
@@ -104,7 +108,7 @@ export function Teacher() {
       () => { if (active) setStorageIssue('error'); },
     );
     return () => { active = false; };
-  }, [draft, grade, language, loadingDraft, text, title]);
+  }, [draft, grade, language, loadingDraft, subject, text, title]);
   useEffect(() => {
     if (!busy) return;
     const start = Date.now();
@@ -138,7 +142,7 @@ export function Teacher() {
     abortRef.current = ctrl;
     setBusy(true); setGenMsg(null); setStructErrors([]);
     try {
-      const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title, grade }), signal: ctrl.signal });
+      const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title, grade, subject }), signal: ctrl.signal });
       const body = readGenerateResponse(await r.json());
       ctrl.signal.throwIfAborted();
       if (!body) {
@@ -167,7 +171,7 @@ export function Teacher() {
 
   function manualDraft() {
     ai.reset();
-    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || DEFAULT_LESSON_TITLE[language], language, grade, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
+    loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || DEFAULT_LESSON_TITLE[language], language, grade, ...(subject === 'math' ? { subject } : {}), sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
   const updTask = (i: number, patch: Partial<Task>) => updateDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
@@ -251,10 +255,16 @@ export function Teacher() {
 
       <section id="t-step-1" className="card scroll-mt-4 space-y-5 p-5 sm:p-7" aria-labelledby="t-step-1-title">
         <StepTitle n={1} id="t-step-1-title">{t('tText')}</StepTitle>
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
           <label className="min-w-0">
             <span className="field-label">{t('tTitle')}</span>
             <input className="input w-full" placeholder={t('tTitlePh')} value={title} disabled={loadingDraft} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
+          </label>
+          <label>
+            <span className="field-label">{t('tSubject')}</span>
+            <select className="input w-full" value={subject} disabled={loadingDraft} onChange={(e) => setSubject(e.target.value === 'math' ? 'math' : 'reading')} data-testid="t-subject">
+              <option value="reading">{t('tSubjectReading')}</option><option value="math">{t('tSubjectMath')}</option>
+            </select>
           </label>
           <label>
             <span className="field-label">{t('tLangLabel')}</span>
@@ -272,7 +282,7 @@ export function Teacher() {
         </div>
         <label className="block">
           <span className="field-label">{t('tTextLabel')}</span>
-          <textarea className="input h-44 w-full font-serif text-[1.0625rem] leading-7" placeholder={t('tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" aria-describedby="t-text-count" />
+          <textarea className="input h-44 w-full font-serif text-[1.0625rem] leading-7" placeholder={t(subject === 'math' ? 'tPasteMath' : 'tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" aria-describedby="t-text-count" />
           <span id="t-text-count" className={`mt-1 block text-caption tabular-nums ${tooLong ? 'text-warn' : 'text-muted'}`}>{t('tCount', { n: sentences.length, max: MAX_SENTENCES, chars: text.trim().length, maxChars: MAX_TEXT_CHARS })}</span>
         </label>
         {sentences.length > 0 && (
@@ -423,6 +433,7 @@ export function Teacher() {
                     <span className="field-label">{t('tHint')}</span>
                     <input className="input w-full" placeholder={t('tHintPh')} aria-label={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
                   </label>
+                  {subjectOf(draft) === 'math' && <MathFields index={i} task={task} onChange={(patch) => updTask(i, patch)} />}
                   {draft.tasks.length > 1 && (
                     <button type="button" className="btn-ghost btn-sm btn-danger" data-testid={`t-remove-task-${i}`}
                       onClick={() => loadDraft({ ...draft, tasks: draft.tasks.filter((_, index) => index !== i) })}><Icon name="trash" className="h-4 w-4" />{t('tRemoveTask')}</button>
@@ -535,6 +546,62 @@ function EvidenceEditor({ index, sentences, sets, onChange }: { index: number; s
         <input className="input mt-1 w-full font-mono text-sm" data-testid={`t-evidence-${index}`} value={text} aria-label={t('tEvidenceText')}
           onChange={(e) => { setText(e.target.value); onChange(parseEvidence(e.target.value)); }} />
       </details>
+    </div>
+  );
+}
+
+/** Математика: объяснение расчёта и формула, которую проверяет код (результат — сразу под полем). */
+function MathFields({ index, task, onChange }: { index: number; task: Task; onChange: (patch: Partial<Task>) => void }) {
+  const { t } = useI18n();
+  const calc: Calc = task.calc ?? { kind: 'value', expr: '', unit: '' };
+  const check = calc.kind === 'value' && !calc.expr.trim() ? null : checkCalc({ ...task, calc });
+  const setCalc = (next: Calc) => onChange({ calc: next });
+  return (
+    <div className="space-y-3 rounded-control border border-line-strong/50 bg-sunken p-3" data-testid={`t-math-${index}`}>
+      <label className="block">
+        <span className="field-label">{t('tSolution')}</span>
+        <textarea className="input w-full" rows={2} placeholder={t('tSolutionPh')} value={task.solution ?? ''} data-testid={`t-solution-${index}`}
+          onChange={(e) => onChange({ solution: e.target.value })} />
+      </label>
+      <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_6rem]">
+        <label>
+          <span className="field-label">{t('tCalcKind')}</span>
+          <select className="input w-full" value={calc.kind === 'value' ? 'value' : calc.pick} data-testid={`t-calc-kind-${index}`}
+            onChange={(e) => setCalc(e.target.value === 'value'
+              ? { kind: 'value', expr: '', unit: calc.unit }
+              : { kind: 'choose', pick: e.target.value === 'max' ? 'max' : 'min', values: calc.kind === 'choose' ? calc.values : {}, unit: calc.unit })}>
+            <option value="value">{t('tCalcValue')}</option><option value="min">{t('tCalcMin')}</option><option value="max">{t('tCalcMax')}</option>
+          </select>
+        </label>
+        {calc.kind === 'value' ? (
+          <label className="min-w-0">
+            <span className="field-label">{t('tCalcExpr')}</span>
+            <input className="input w-full font-mono" placeholder="35000-18000-24*600" value={calc.expr} data-testid={`t-calc-expr-${index}`}
+              onChange={(e) => setCalc({ ...calc, expr: e.target.value })} />
+          </label>
+        ) : (
+          <div className="min-w-0 space-y-1">
+            <span className="field-label">{t('tCalcPerOption')}</span>
+            {task.options.map((o) => (
+              <label key={o.id} className="flex items-center gap-2">
+                <span className="w-4 text-sm font-semibold text-muted">{o.id}</span>
+                <input className="input min-w-0 flex-1 font-mono" value={calc.values[o.id] ?? ''} data-testid={`t-calc-opt-${index}-${o.id}`}
+                  onChange={(e) => { const values = { ...calc.values }; if (e.target.value.trim()) values[o.id] = e.target.value; else delete values[o.id]; setCalc({ ...calc, values }); }} />
+              </label>
+            ))}
+          </div>
+        )}
+        <label>
+          <span className="field-label">{t('tCalcUnit')}</span>
+          <input className="input w-full" placeholder="₸" value={calc.unit} data-testid={`t-calc-unit-${index}`} onChange={(e) => setCalc({ ...calc, unit: e.target.value })} />
+        </label>
+      </div>
+      {check && (
+        <p className={`note ${check.ok ? 'note-ok' : 'note-bad'}`} role="status" data-testid={`t-calc-check-${index}`} data-ok={check.ok}>
+          <Icon name={check.ok ? 'check' : 'alert'} className="mt-px h-5 w-5" />
+          <span>{check.ok ? t('tCalcOk', { value: check.value === null ? '—' : String(Math.round(check.value * 100) / 100), unit: calc.unit }) : t('tCalcBad')}</span>
+        </p>
+      )}
     </div>
   );
 }

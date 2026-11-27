@@ -461,3 +461,46 @@ test('проверка ИИ: сломанное исправление не ме
   await expect(page.getByTestId('t-ai-fix-error-1')).toContainText('не прошло проверку');
   await expect(page.getByTestId('t-task-1').getByPlaceholder(/Вопрос/)).toHaveValue(before);
 });
+
+test('учитель: математика — генерация, расчёт проверен кодом, правка, экспорт и импорт в новом профиле ученика', async ({ page, browser }) => {
+  await page.getByTestId('t-subject').selectOption('math');
+  await page.getByTestId('t-text').fill('Билет стоит 600 ₸ для ученика.\nВ поездку едут 10 учеников.\nАвтобус стоит 6 000 ₸, такси — 4 000 ₸ за машину, нужно 2 машины.');
+  await expect(page.getByTestId('t-preview')).toContainText('s3');
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-generate')).toHaveText(/Сгенерировать/);
+  await expect(page.getByTestId('t-math-1')).toBeVisible();
+  await expect(page.getByTestId('t-calc-check-1')).toHaveAttribute('data-ok', 'true');
+  await expect(page.getByTestId('t-calc-check-1')).toContainText('6000 ₸');
+  await page.getByTestId('t-solution-1').fill('10 × 600 ₸ = 6 000 ₸ — проверено учителем.');
+  const json = await exportJson(page);
+  expect((json as unknown as { subject: string }).subject).toBe('math');
+  const lesson = json as unknown as { id: string; tasks: { solution: string; calc: unknown }[] };
+  expect(lesson.tasks[1]!.solution).toContain('проверено учителем');
+  expect(lesson.tasks[1]!.calc).toMatchObject({ kind: 'value', expr: '10*600' });
+  // Новый профиль ученика: импорт → урок в «Математике» → решение с расчётом.
+  const student = await (await browser.newContext()).newPage();
+  await student.goto('/');
+  await student.getByTestId('import-open').click();
+  await student.getByTestId('import-file').setInputFiles({ name: 'math.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(json)) });
+  await expect(student.getByTestId('import-ok')).toBeVisible();
+  await expect(student.getByTestId('subject-math')).toHaveAttribute('aria-pressed', 'true');
+  await student.getByTestId(`lesson-${lesson.id}`).click();
+  await student.getByTestId('opt-a').check(); await student.getByTestId('sent-s1').click(); await student.getByTestId('check').click();
+  await student.getByTestId('next').click();
+  await student.getByTestId('opt-a').check(); await student.getByTestId('sent-s1').click(); await student.getByTestId('sent-s2').click(); await student.getByTestId('check').click();
+  await expect(student.getByTestId('solution')).toContainText('проверено учителем');
+});
+
+test('учитель: математика — расчёт не сходится с верным вариантом, урок не сохранить', async ({ page }) => {
+  await page.getByTestId('t-subject').selectOption('math');
+  await page.getByTestId('t-text').fill('МАРКЕР-CALC-BAD билет стоит 600 ₸.\nВ поездку едут 10 учеников.\nАвтобус стоит 6 000 ₸.');
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-generate')).toHaveText(/Сгенерировать/);
+  await expect(page.getByTestId('t-calc-check-1')).toHaveAttribute('data-ok', 'false');
+  await expect(page.getByTestId('t-quality')).toContainText('по расчёту получается 6000');
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+  // Учитель исправляет вариант — расчёт сходится, экспорт доступен.
+  await page.getByTestId('t-task-1').getByLabel('Вариант a', { exact: true }).fill('6 000 ₸');
+  await expect(page.getByTestId('t-calc-check-1')).toHaveAttribute('data-ok', 'true');
+  await expect(page.getByTestId('t-export')).toBeEnabled();
+});

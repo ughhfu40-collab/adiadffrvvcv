@@ -42,6 +42,8 @@ for (const [pname, prof] of Object.entries(profiles)) {
       if (!blocked) issues.push('сеть не отключилась');
     }
     const t0 = Date.now();
+    // Урок виден только в своём разделе: «Чтение» или «Математика».
+    await p.getByTestId(`subject-${lesson.subject === 'math' ? 'math' : 'reading'}`).click().catch(() => {});
     const card = p.getByTestId(`lesson-${lesson.id}`);
     if (!(await card.isVisible())) { await p.getByTestId('grade-all').click().catch(() => {}); }
     await tap(card);
@@ -66,7 +68,8 @@ for (const [pname, prof] of Object.entries(profiles)) {
       const text = texts.join(' | ');
       if (got.answer !== m.expect.answer || got.evidence !== m.expect.evidence) issues.push(`${lesson.id}/${task.id}: «${m.name}» → ${JSON.stringify(got)}, ожидалось ${JSON.stringify(m.expect)}`);
       if ((lesson.language === 'kk') !== KK_LETTERS.test(text)) issues.push(`${lesson.id}/${task.id}: обратная связь не на языке урока: ${text}`);
-      if (task.skill === 'match' && !/втор|Екінші/i.test(text)) issues.push(`${lesson.id}/${task.id}: для сопоставления нет подсказки про вторую деталь: ${text}`);
+      if (task.skill === 'match' && lesson.subject !== 'math' && !/втор|Екінші/i.test(text)) issues.push(`${lesson.id}/${task.id}: для сопоставления нет подсказки про вторую деталь: ${text}`);
+      if (task.skill === 'match' && lesson.subject === 'math' && !/не хватает|жетпейтін/i.test(text)) issues.push(`${lesson.id}/${task.id}: в математике нет подсказки, какой величины не хватает: ${text}`);
       // Попытка 2 — исправление
       const answerKept = await p.getByTestId(`opt-${m.option}`).isChecked();
       if (!answerKept) issues.push(`${lesson.id}/${task.id}: выбранный ответ сбросился после проверки`);
@@ -85,8 +88,10 @@ for (const [pname, prof] of Object.entries(profiles)) {
     // Рекомендация считается асинхронно, экран завершения на телефоне плавно прокручивается — ждём и то, и другое.
     const recShown = await p.locator('[data-testid="recommendation"], [data-testid="no-recommendation"]').first().waitFor({ timeout: 5000 }).then(() => true, () => false);
     const rec = (await p.getByTestId('recommendation').count()) ? await p.getByTestId('recommendation').innerText() : null;
-    const hasPeer = lessons.some((item) => item.id !== lesson.id && item.grade === lesson.grade && item.language === lesson.language);
+    const subj = (l) => (l.subject === 'math' ? 'math' : 'reading');
+    const hasPeer = lessons.some((item) => item.id !== lesson.id && item.grade === lesson.grade && item.language === lesson.language && subj(item) === subj(lesson));
     if (!recShown || (hasPeer && !rec)) issues.push(`${lesson.id}: после урока с ошибками нет рекомендации`);
+    else if (!rec && /не требуется|қажет емес/.test(await p.getByTestId('no-recommendation').innerText())) issues.push(`${lesson.id}: после урока с ошибками экран пишет, что задание не требуется`);
     else if (!hasPeer && rec) issues.push(`${lesson.id}: рекомендован урок другого класса или языка`);
     else if (rec && !lessons.some((item) => item.id !== lesson.id && item.grade === lesson.grade && item.language === lesson.language && rec.includes(item.title))) {
       issues.push(`${lesson.id}: рекомендация не соответствует классу и языку`);
@@ -101,6 +106,7 @@ for (const [pname, prof] of Object.entries(profiles)) {
   await p.reload();
   await p.getByTestId('grade-all').click().catch(() => {});
   for (const lesson of lessons) {
+    await p.getByTestId(`subject-${lesson.subject === 'math' ? 'math' : 'reading'}`).click().catch(() => {});
     await expect(p.getByTestId(`lesson-${lesson.id}`)).toContainText(/3 из 3|3 тапсырманың 3/)
       .catch(() => issues.push(`${lesson.id}: после офлайн-перезагрузки прогресс не 3 из 3`));
   }

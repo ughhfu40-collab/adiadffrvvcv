@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useLiveQuery } from 'dexie-react-hooks';
 import { checkAnswer, DEFAULT_GRADE, feedbackParts, GRADES, GradeSchema, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Grade, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
+import { MATH_SKILL_LABELS, subjectOf, type Subject } from '../../shared/math';
 import { db, importLesson, readProgress, solvedKeys } from './db';
 import { PITCH_URL, useI18n } from './i18n';
 import { Icon, Spinner } from './Icon';
@@ -17,6 +18,13 @@ function readGrade(): GradeFilter {
   try { return GradeSchema.safeParse(Number(localStorage.getItem(GRADE_KEY))).data ?? 'all'; }
   catch { return 'all'; }
 }
+const SUBJECT_KEY = 'oqy-subject';
+function readSubject(): Subject {
+  try { return localStorage.getItem(SUBJECT_KEY) === 'math' ? 'math' : 'reading'; }
+  catch { return 'reading'; }
+}
+/** Подписи навыков зависят от раздела: в математике — «найти данные / посчитать / выбрать и обосновать». */
+export const skillLabel = (subject: Subject, lang: Language, skill: Skill) => (subject === 'math' ? MATH_SKILL_LABELS : SKILL_LABELS)[lang][skill];
 const firstUnsolved = (l: Lesson, solved: Set<string>) => l.tasks.findIndex((x) => !solved.has(`${l.id}/${x.id}`));
 
 /** «Начать урок»: задание 1 первого незавершённого урока на языке интерфейса; если все завершены — первого урока. */
@@ -33,6 +41,11 @@ export function Student() {
   const solved = progress?.solved ?? EMPTY_SOLVED;
   const [play, setPlay] = useState<Play | null>(null);
   const [grade, setGrade] = useState(readGrade);
+  const [subject, setSubject] = useState<Subject>(readSubject);
+  const selectSubject = (value: Subject) => {
+    setSubject(value);
+    try { localStorage.setItem(SUBJECT_KEY, value); } catch { /* Storage can be disabled. */ }
+  };
   const [importOpen, setImportOpen] = useState(false);
   const importId = useId();
   const selectGrade = (value: GradeFilter) => {
@@ -42,19 +55,28 @@ export function Student() {
 
   if (play) return <Player key={play.lesson.id + play.taskIds.join() + (play.startIdx ?? 0)} play={play} all={all} onExit={() => setPlay(null)} onPlay={setPlay} />;
 
-  // Уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
-  const ordered = (rows ?? []).filter((row) => grade === 'all' || row.lesson.grade === grade)
+  // Раздел и класс; уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
+  const inView = (lesson: Lesson) => subjectOf(lesson) === subject && (grade === 'all' || lesson.grade === grade);
+  const ordered = (rows ?? []).filter((row) => inView(row.lesson))
     .sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang) || a.lesson.grade - b.lesson.grade);
-  const start = progress === undefined ? null : pickStart(all.filter((lesson) => grade === 'all' || grade === lesson.grade), lang, solved);
+  const start = progress === undefined ? null : pickStart(all.filter(inView), lang, solved);
   const startPlay = () => start && setPlay({ lesson: start, taskIds: start.tasks.map((x) => x.id) });
 
   return (
     <div className="space-y-14 pt-6 sm:space-y-20 sm:pt-12">
       <section className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14" aria-labelledby="hero-title">
         <div>
-          <p className="kicker">{t('heroKicker')}</p>
-          <h1 id="hero-title" className="mt-3 font-serif text-display font-semibold">{t('heroTitle')}</h1>
-          <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">{t('heroSub')}</p>
+          {/* Раздел: «Чтение / Математика». Выбор запоминается, как класс и язык. */}
+          <div role="group" aria-label={t('subjectLabel')} className="mb-5 inline-flex rounded-full border border-line-strong/50 bg-card p-1" data-testid="subject-switch">
+            {(['reading', 'math'] as const).map((value) => (
+              <button type="button" key={value} aria-pressed={subject === value} data-testid={`subject-${value}`}
+                className={`min-h-10 rounded-full px-4 text-sm transition-colors duration-150 ${subject === value ? 'bg-ink font-semibold text-paper' : 'text-muted hover:bg-sunken hover:text-ink'}`}
+                onClick={() => selectSubject(value)}>{t(value === 'math' ? 'subjectMath' : 'subjectReading')}</button>
+            ))}
+          </div>
+          <p className="kicker">{t(subject === 'math' ? 'heroKickerMath' : 'heroKicker')}</p>
+          <h1 id="hero-title" className="mt-3 font-serif text-display font-semibold">{t(subject === 'math' ? 'heroTitleMath' : 'heroTitle')}</h1>
+          <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">{t(subject === 'math' ? 'heroSubMath' : 'heroSub')}</p>
           <div className="mt-6 flex flex-col gap-4 sm:mt-8">
             <div className="flex flex-wrap items-center gap-3">
               <span id="grade-label" className="text-sm font-medium text-muted">{t('gradeLabel')}</span>
@@ -85,20 +107,20 @@ export function Student() {
             </a>
           </p>
         </div>
-        <HeroExample lang={lang} grade={start?.grade ?? (grade === 'all' ? DEFAULT_GRADE : grade)} />
+        <HeroExample lang={lang} subject={subject} grade={start?.grade ?? (grade === 'all' ? DEFAULT_GRADE : grade)} />
       </section>
 
       <section aria-labelledby="lessons-title">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-4">
           <div>
             <h2 id="lessons-title" className="font-serif text-title font-semibold">{t('lessons')}</h2>
-            <p className="mt-1 text-sm text-muted">{t('lessonsLead')}</p>
+            <p className="mt-1 text-sm text-muted">{t(subject === 'math' ? 'lessonsLeadMath' : 'lessonsLead')}</p>
           </div>
           <button type="button" className="btn-ghost" data-testid="import-open" aria-expanded={importOpen} aria-controls={importId} onClick={() => setImportOpen((o) => !o)}>
             <Icon name={importOpen ? 'minus' : 'plus'} className="h-4 w-4" /> {t('addLesson')}
           </button>
         </div>
-        {importOpen && <div id={importId} className="mt-5"><ImportBox onImported={selectGrade} /></div>}
+        {importOpen && <div id={importId} className="mt-5"><ImportBox onImported={(lesson) => { selectGrade(lesson.grade); selectSubject(subjectOf(lesson)); }} /></div>}
         {rows === undefined && <p className="mt-5 flex items-center gap-2 text-sm text-muted" role="status"><Spinner />{t('loading')}</p>}
         {rows && !ordered.length && (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-card border border-dashed border-line-strong/60 p-5">
@@ -142,7 +164,7 @@ export function Student() {
       <section aria-labelledby="progress-title">
         <div className="border-b border-line pb-4">
           <h2 id="progress-title" className="font-serif text-title font-semibold">{t('progressTitle')}</h2>
-          <p className="mt-1 text-sm text-muted">{t('progressLead')}</p>
+          <p className="mt-1 text-sm text-muted">{t(subject === 'math' ? 'progressLeadMath' : 'progressLead')}</p>
         </div>
         {!progress ? (
           <p className="mt-5 text-sm text-muted" role="status" data-testid="progress">{t(progress === undefined ? 'loading' : 'progressUnavailable')}</p>
@@ -150,13 +172,13 @@ export function Student() {
           {(['find', 'match', 'infer'] as Skill[]).map((s, i) => (
             <li key={s} className="card" data-testid={`progress-${s}`}>
               <div className="flex items-center gap-2.5 text-sm font-medium text-ink">
-                <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">{i + 1}</span>{SKILL_LABELS[lang][s]}
+                <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">{i + 1}</span>{skillLabel(subject, lang, s)}
               </div>
               <div className="mt-3 flex items-baseline gap-1.5">
-                <span className="font-serif text-[2.5rem] font-semibold leading-none tabular-nums">{progress.skills[s].solved}</span>{' '}
+                <span className="font-serif text-[2.5rem] font-semibold leading-none tabular-nums">{progress.bySubject[subject][s].solved}</span>{' '}
                 <span className="text-sm text-muted">{t('solved')}</span>
               </div>
-              <div className="mt-2 text-caption tabular-nums text-muted">{t('errorsAttempts', { e: progress.skills[s].errors, a: progress.skills[s].attempts })}</div>
+              <div className="mt-2 text-caption tabular-nums text-muted">{t('errorsAttempts', { e: progress.bySubject[subject][s].errors, a: progress.bySubject[subject][s].attempts })}</div>
             </li>
           ))}
         </ul>}
@@ -166,12 +188,12 @@ export function Student() {
 }
 
 /** Фрагмент настоящего встроенного урока: предложение-доказательство выделено маркером (только на широком экране). */
-function HeroExample({ lang, grade }: { lang: Language; grade: Grade }) {
+function HeroExample({ lang, grade, subject }: { lang: Language; grade: Grade; subject: Subject }) {
   const { t } = useI18n();
   const preferred = lang === 'kk' ? 'kk-balkhash' : 'ru-saiga';
-  const lesson = grade === DEFAULT_GRADE
+  const lesson = subject === 'reading' && grade === DEFAULT_GRADE
     ? BUILTIN_LESSONS.find((item) => item.id === preferred)
-    : BUILTIN_LESSONS.find((item) => item.grade === grade && item.language === lang);
+    : BUILTIN_LESSONS.find((item) => subjectOf(item) === subject && item.grade === grade && item.language === lang);
   if (!lesson) return null;
   const task = lesson.tasks[0]!;
   const ev = task.evidenceSets[0]?.[0];
@@ -212,7 +234,7 @@ function HeroExample({ lang, grade }: { lang: Language; grade: Grade }) {
   );
 }
 
-function ImportBox({ onImported }: { onImported: (grade: Grade) => void }) {
+function ImportBox({ onImported }: { onImported: (lesson: Lesson) => void }) {
   const { t } = useI18n();
   const [errors, setErrors] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'same' | 'renamed'; text: string } | null>(null);
@@ -230,7 +252,7 @@ function ImportBox({ onImported }: { onImported: (grade: Grade) => void }) {
         return;
       }
       const out = await importLesson(r.lesson);
-      onImported(out.lesson.grade);
+      onImported(out.lesson);
       if (out.status === 'new') setMsg({ kind: 'ok', text: t('importOk', { title: out.lesson.title }) });
       else if (out.status === 'same') setMsg({ kind: 'same', text: t('importSame', { title: out.lesson.title }) });
       else setMsg({ kind: 'renamed', text: t('importConflict', { id: out.originalId, title: out.lesson.title, newId: out.lesson.id }) });
@@ -288,7 +310,7 @@ const PLAYER_TEXT = {
     needBoth: 'Чтобы проверить, выбери ответ и отметь хотя бы одно предложение.',
     saving: 'Сохраняю…', saveError: 'Не удалось сохранить попытку. Ответ и цитаты остались выбраны. Попробуй ещё раз.',
     done: 'Урок пройден!', more: 'Ещё одно задание', back: 'К урокам', task: 'Задание {n} из {total}',
-    weak: 'Навык с ошибками:', noRec: 'Дополнительное задание не требуется.', recLoading: 'Подбираю дополнительное задание…',
+    weak: 'Навык с ошибками:', noRec: 'Дополнительное задание не требуется.', noRecYet: 'Других заданий для этого класса и языка пока нет. Пройди урок ещё раз — ошибки станут подсказкой.', recLoading: 'Подбираю дополнительное задание…',
     recError: 'Не удалось загрузить рекомендацию. Вернись к урокам и выбери следующий.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
     textLabel: 'Текст', grade: '{g} класс', doneLead: 'Все задания решены: ответы выбраны и доказаны цитатами из текста.', recTitle: 'Потренируй навык',
     retry: 'Исправь то, что отмечено крестиком, и проверь ещё раз.',
@@ -302,12 +324,40 @@ const PLAYER_TEXT = {
     needBoth: 'Тексеру үшін жауапты таңдап, кемінде бір сөйлемді белгіле.',
     saving: 'Сақталуда…', saveError: 'Тапсырма нәтижесі сақталмады. Жауап пен дәлелдер белгіленіп тұр. Қайта тексеріп көр.',
     done: 'Сабақ аяқталды!', more: 'Тағы бір тапсырма', back: 'Сабақтарға', task: '{total} тапсырманың {n}-сі',
-    weak: 'Қатесі бар дағды:', noRec: 'Қосымша тапсырма қажет емес.', recLoading: 'Қосымша тапсырма таңдалуда…',
+    weak: 'Қатесі бар дағды:', noRec: 'Қосымша тапсырма қажет емес.', noRecYet: 'Бұл сынып пен тілге басқа тапсырма әзірге жоқ. Сабақты қайта өт — қателер кеңес болады.', recLoading: 'Қосымша тапсырма таңдалуда…',
     recError: 'Ұсынысты жүктеу мүмкін болмады. Сабақтарға оралып, келесісін таңда.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
     textLabel: 'Мәтін', grade: '{g}-сынып', doneLead: 'Барлық тапсырма орындалды: жауаптар таңдалып, мәтіннен дәлелденді.', recTitle: 'Дағдыны жаттықтыр',
     retry: 'Айқышпен белгіленгенді түзетіп, қайта тексер.',
     retryAdd: 'Белгіленген сөйлемді қалдырып, тағы біреуін қос та, қайта тексер.',
   },
+} as const;
+
+/** Математика: те же шаги, но доказательство — строки с исходными данными. */
+const MATH_TEXT = {
+  ru: {
+    textHint: 'Нажми на строку с данными, которые нужны для ответа, — она выделится маркером. Нажми ещё раз, чтобы снять.',
+    step2: 'Отметь нужные данные в условии', noQuote: 'Данные пока не отмечены.',
+    needBoth: 'Чтобы проверить, выбери ответ и отметь хотя бы одну строку с данными.',
+    solved: 'Отлично: ответ обоснован данными.', sentence: 'Строка', textLabel: 'Условие',
+    doneLead: 'Все задания решены: ответы выбраны и обоснованы данными из условия.',
+    retry: 'Исправь то, что отмечено крестиком, и проверь ещё раз.',
+    retryAdd: 'Отмеченные данные оставь и добавь недостающую величину, потом проверь ещё раз.',
+  },
+  kk: {
+    textHint: 'Жауапқа керек деректі жолды бас — ол маркермен белгіленеді. Белгіні алу үшін қайта бас.',
+    step2: 'Шарттан керек деректерді белгіле', noQuote: 'Деректер әзірге белгіленбеген.',
+    needBoth: 'Тексеру үшін жауапты таңдап, деректі кемінде бір жолды белгіле.',
+    solved: 'Тамаша: жауап деректермен негізделді.', sentence: 'Жол', textLabel: 'Шарт',
+    doneLead: 'Барлық тапсырма орындалды: жауаптар таңдалып, шарттағы деректермен негізделді.',
+    retry: 'Айқышпен белгіленгенді түзетіп, қайта тексер.',
+    retryAdd: 'Белгіленген деректерді қалдырып, жетпейтін шаманы қос та, қайта тексер.',
+  },
+} as const;
+
+/** Итоги проверки в математике: «данные» вместо «цитат»; при нехватке — какую величину найти (подсказка задания). */
+const MATH_PARTS = {
+  ru: { correct: 'Данные выбраны верно', missing: 'Данных пока не хватает', extra: 'Лишнее данное', wrong: 'Эти данные не нужны для ответа', empty: 'Данные не отмечены', find: 'Найди, какой величины не хватает:', calc: 'Расчёт' },
+  kk: { correct: 'Деректер дұрыс таңдалды', missing: 'Деректер әзірге жеткіліксіз', extra: 'Артық дерек', wrong: 'Бұл деректер жауапқа керек емес', empty: 'Деректер белгіленбеген', find: 'Қай шама жетпейтінін тап:', calc: 'Есептеу' },
 } as const;
 
 const fill = (s: string, v: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k: string) => String(v[k] ?? ''));
@@ -348,8 +398,27 @@ const PROOF_TEST = {
   },
 } as const;
 
+const PROOF_TEST_MATH = {
+  ru: {
+    choose: 'Убери одно исходное данное.',
+    question: 'Можно ли без него всё ещё обосновать ответ?',
+    keep: 'Можно, данных хватит',
+    need: 'Нельзя, без него не посчитать',
+    yes: 'Оставшихся данных хватает: это другой допустимый набор.',
+    no: 'Без этого данного ответ не получить. Подумай, какую величину оно даёт для расчёта.',
+  },
+  kk: {
+    choose: 'Бір бастапқы деректі алып таста.',
+    question: 'Онсыз жауапты әлі де негіздеуге бола ма?',
+    keep: 'Болады, деректер жеткілікті',
+    need: 'Болмайды, онсыз есептей алмаймын',
+    yes: 'Қалған деректер жеткілікті: бұл басқа рұқсат етілген жиын.',
+    no: 'Бұл деректерсіз жауап шықпайды. Ол есептеуге қандай шама беретінін ойлан.',
+  },
+} as const;
+
 function ProofTest({ task, lesson, evidence, order }: { task: Task; lesson: Lesson; evidence: string[]; order: Map<string, number> }) {
-  const t = PROOF_TEST[lesson.language];
+  const t: Record<keyof typeof PROOF_TEST.ru, string> = subjectOf(lesson) === 'math' ? { ...PROOF_TEST[lesson.language], ...PROOF_TEST_MATH[lesson.language] } : PROOF_TEST[lesson.language];
   const [removed, setRemoved] = useState<string | null>(null);
   const [guess, setGuess] = useState<boolean | null>(null);
   const remaining = evidence.filter((id) => id !== removed);
@@ -402,13 +471,15 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   const writingAttempt = useRef(false);
   const [showHint, setShowHint] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [hadErrors, setHadErrors] = useState(false);
   const [rec, setRec] = useState<ReturnType<typeof recommendNext> | 'unavailable'>();
   const textRef = useRef<HTMLElement>(null);
   const questionRef = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
   const task = tasks[idx];
   const lang = lesson.language;
-  const t = PLAYER_TEXT[lang];
+  const math = subjectOf(lesson) === 'math';
+  const t: Record<keyof typeof PLAYER_TEXT.ru, string> = math ? { ...PLAYER_TEXT[lang], ...MATH_TEXT[lang] } : PLAYER_TEXT[lang];
   const order = new Map(lesson.sentences.map((s, i) => [s.id, i]));
 
   useEffect(() => {
@@ -417,9 +488,9 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
     setRec(undefined);
     void db.transaction('r', db.attempts, async () => {
       const attempts = await db.attempts.where('lessonId').equals(lesson.id).toArray();
-      return recommendNext(all, lesson, attempts, await solvedKeys());
+      return { next: recommendNext(all, lesson, attempts, await solvedKeys()), hadErrors: attempts.some((a) => !a.solved) };
     }).then(
-      (next) => { if (active) setRec(next); },
+      ({ next, hadErrors: errs }) => { if (active) { setHadErrors(errs); setRec(next); } },
       () => { if (active) setRec('unavailable'); },
     );
     return () => { active = false; };
@@ -461,7 +532,15 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   };
   const goText = () => { textRef.current?.scrollIntoView({ block: 'start' }); textRef.current?.focus({ preventScroll: true }); };
   const goQuestion = () => { questionRef.current?.scrollIntoView({ block: 'start' }); questionRef.current?.focus({ preventScroll: true }); };
-  const parts = result && task ? feedbackParts(lang, result, task) : null;
+  const baseParts = result && task ? feedbackParts(lang, result, task) : null;
+  // Математика: те же два итога, но про данные; при нехватке данных — подсказка, какую величину найти.
+  const parts = baseParts && result && task && math
+    ? {
+        ...baseParts,
+        evidence: MATH_PARTS[lang][result.evidence],
+        tip: result.evidence === 'missing' ? [result.answerCorrect ? '' : baseParts.tip, `${MATH_PARTS[lang].find} ${task.hint}`].filter(Boolean).join(' ') : baseParts.tip,
+      }
+    : baseParts;
   const isLast = idx + 1 >= tasks.length;
 
   return (
@@ -479,7 +558,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
           <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
             {tasks.map((x, k) => <span key={x.id} className={`h-2 w-8 rounded-full ${k < idx ? 'bg-brand' : k === idx ? 'bg-brand/45 ring-1 ring-brand-ink ring-offset-1 ring-offset-paper' : 'border border-line-strong/50 bg-sunken'}`} />)}
           </span>
-          <span className="tabular-nums"><b className="font-semibold text-ink">{fill(t.task, { n: idx + 1, total: tasks.length })}</b> · {SKILL_LABELS[lang][task.skill]}</span>
+          <span className="tabular-nums"><b className="font-semibold text-ink">{fill(t.task, { n: idx + 1, total: tasks.length })}</b> · {skillLabel(subjectOf(lesson), lang, task.skill)}</span>
         </div>
       )}
 
@@ -500,11 +579,11 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
               ) : rec ? (
                 <div className="rounded-control border border-line bg-sunken p-4" data-testid="recommendation">
                   <p className="kicker">{t.recTitle}</p>
-                  <p className="mt-2 text-sm">{t.weak} <b>{SKILL_LABELS[lang][rec.skill]}</b></p>
+                  <p className="mt-2 text-sm">{t.weak} <b>{skillLabel(subjectOf(lesson), lang, rec.skill)}</b></p>
                   <p className="wrap-any mt-1 text-sm text-muted">«{rec.task.question}» — {rec.lesson.title}</p>
                   <button type="button" className="btn mt-4" data-testid="rec-start" onClick={() => onPlay({ lesson: rec.lesson, taskIds: [rec.task.id] })}>{t.more} <Icon name="arrow-right" /></button>
                 </div>
-              ) : <p className="note note-ok" data-testid="no-recommendation"><Icon name="check" className="mt-px h-5 w-5" /><span>{t.noRec}</span></p>}
+              ) : <p className={`note ${hadErrors ? 'note-info' : 'note-ok'}`} data-testid="no-recommendation" data-had-errors={hadErrors}><Icon name={hadErrors ? 'info' : 'check'} className="mt-px h-5 w-5" /><span>{hadErrors ? t.noRecYet : t.noRec}</span></p>}
               <button type="button" className={rec && rec !== 'unavailable' ? 'btn-ghost' : 'btn'} onClick={onExit}>{t.back}</button>
             </div>
           ) : task ? (
@@ -574,6 +653,12 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                   </p>
                   {parts.tip && <p className="flex items-start gap-2.5 text-sm text-ink" ><Icon name="bulb" className="mt-px h-5 w-5 text-warn" /><span data-testid="feedback-tip">{parts.tip}</span></p>}
                   {!result.solved && <p className="pl-[34px] text-sm text-muted" data-testid="feedback-retry">{result.answerCorrect && result.evidence === 'missing' ? t.retryAdd : t.retry}</p>}
+                </div>
+              )}
+              {result?.solved && math && task.solution && (
+                <div className="note note-ok" data-testid="solution" lang={lang}>
+                  <Icon name="check" className="mt-px h-5 w-5" />
+                  <p><b>{MATH_PARTS[lang].calc}:</b> <span className="tabular-nums">{task.solution}</span></p>
                 </div>
               )}
               {result?.solved && evidence.length > 1 && <ProofTest task={task} lesson={lesson} evidence={evidence} order={order} />}

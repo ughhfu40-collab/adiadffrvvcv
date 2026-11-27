@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CalcSchema, checkCalc, SubjectSchema, subjectOf, type CalcCheck } from './math';
 
 // Русские сообщения для всех ошибок схемы (импорт JSON, /api/validate, /api/generate).
 // Явные сообщения у конкретных полей важнее этой карты.
@@ -69,6 +70,10 @@ export const TaskSchema = z.object({
   /** Каждый элемент — допустимый набор ID предложений-доказательств. */
   evidenceSets: z.array(z.array(z.string().min(1)).min(1)).min(1),
   hint: NonBlankText,
+  /** Математика: короткий расчёт с единицами, показывается после верного ответа. */
+  solution: z.string().optional(),
+  /** Математика: формула, которой код проверяет верный вариант. */
+  calc: CalcSchema.optional(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -78,6 +83,8 @@ export const LessonBaseSchema = z.object({
   title: NonBlankText,
   language: LanguageSchema,
   grade: GradeSchema,
+  /** Раздел: «Чтение» (по умолчанию, в том числе для старых JSON) или «Математика». */
+  subject: SubjectSchema.optional(),
   sentences: z.array(SentenceSchema).min(2),
   tasks: z.array(TaskSchema).min(1),
 });
@@ -322,7 +329,7 @@ export function recommendNext(
   const ranked = (Object.keys(errors) as Skill[]).filter((s) => errors[s] > 0).sort((a, b) => errors[b] - errors[a]);
   for (const skill of ranked) {
     const candidates = lessons
-      .filter((l) => l.grade === current.grade && l.language === current.language && l.id !== current.id)
+      .filter((l) => l.grade === current.grade && l.language === current.language && subjectOf(l) === subjectOf(current) && l.id !== current.id)
       .flatMap((l) => l.tasks.filter((t) => t.skill === skill).map((task) => ({ lesson: l, task, skill })));
     const pick = candidates.find((c) => !solvedKeys.has(`${c.lesson.id}/${c.task.id}`)) ?? candidates[0];
     if (pick) return pick;
@@ -337,7 +344,8 @@ export type QualityIssue =
   | { code: 'missing-skill'; skill: Skill; taskIndex: null }
   | { code: 'duplicate-skill'; skill: Skill; taskIndex: number }
   | { code: 'duplicate-option-text'; skill: Skill; taskIndex: number }
-  | { code: 'too-few-evidence'; skill: Skill; taskIndex: number; setIndex: number };
+  | { code: 'too-few-evidence'; skill: Skill; taskIndex: number; setIndex: number }
+  | { code: 'calc'; skill: Skill; taskIndex: number; check: Exclude<CalcCheck, { ok: true }> };
 
 /** По одному заданию каждого типа, различимые варианты, минимум два доказательства для match и infer. */
 export function qualityIssues(lesson: Pick<Lesson, 'tasks'>): QualityIssue[] {
@@ -353,6 +361,9 @@ export function qualityIssues(lesson: Pick<Lesson, 'tasks'>): QualityIssue[] {
         if (new Set(set).size < 2) issues.push({ code: 'too-few-evidence', skill: t.skill, taskIndex: i, setIndex: si });
       });
     }
+    // Математика: расчёт проверяется кодом — формула должна давать верный вариант.
+    const calc = checkCalc(t);
+    if (!calc.ok) issues.push({ code: 'calc', skill: t.skill, taskIndex: i, check: calc });
   });
   for (const s of ['find', 'match', 'infer'] as Skill[]) if (!seen.has(s)) issues.push({ code: 'missing-skill', skill: s, taskIndex: null });
   return issues;
@@ -365,12 +376,28 @@ export function qualityIssueText(lang: Language, q: QualityIssue): string {
     if (q.code === 'missing-skill') return `«${skill}» түріндегі тапсырма жоқ`;
     if (q.code === 'duplicate-skill') return `${n}-тапсырма: «${skill}» түрі қайталанады — әр түрден бір тапсырма керек`;
     if (q.code === 'duplicate-option-text') return `${n}-тапсырмада бірдей жауап нұсқалары бар. Оларды бір-бірінен ажырататындай етіп жазыңыз.`;
+    if (q.code === 'calc') return calcIssueText('kk', n, q.check);
     return `${n}-тапсырма (${skill}): ${q.setIndex + 1}-жиында кемінде екі түрлі сөйлем болуы керек`;
   }
   if (q.code === 'missing-skill') return `Нет задания типа «${skill}»`;
   if (q.code === 'duplicate-skill') return `Задание ${n}: тип «${skill}» повторяется — нужно по одному заданию каждого типа`;
   if (q.code === 'duplicate-option-text') return `Задание ${n} содержит одинаковые варианты ответа. Сформулируйте их по-разному.`;
+  if (q.code === 'calc') return calcIssueText('ru', n, q.check);
   return `Задание ${n} (${skill}): в наборе ${q.setIndex + 1} нужно минимум два разных предложения`;
+}
+
+const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, ''));
+function calcIssueText(lang: Language, n: string, c: Exclude<CalcCheck, { ok: true }>): string {
+  if (lang === 'kk') {
+    if (c.reason === 'bad-expr') return `${n}-тапсырма: есептеу формуласы қате — «${c.expr}»`;
+    if (c.reason === 'mismatch') return `${n}-тапсырма: есеп бойынша ${fmtNum(c.expected)} шығады, ал дұрыс нұсқада басқа сан`;
+    if (c.reason === 'ambiguous') return `${n}-тапсырма: ${fmtNum(c.expected)} саны қате ${c.optionId} нұсқасында да бар — жауап біреу емес`;
+    return c.expectedOptionId === '—' ? `${n}-тапсырма: бірнеше нұсқаның мәні бірдей — жауап біреу емес` : `${n}-тапсырма: есеп бойынша дұрыс нұсқа — ${c.expectedOptionId}`;
+  }
+  if (c.reason === 'bad-expr') return `Задание ${n}: ошибка в формуле расчёта — «${c.expr}»`;
+  if (c.reason === 'mismatch') return `Задание ${n}: по расчёту получается ${fmtNum(c.expected)}, а в верном варианте другое число`;
+  if (c.reason === 'ambiguous') return `Задание ${n}: число ${fmtNum(c.expected)} есть и в неверном варианте ${c.optionId} — ответ не единственный`;
+  return c.expectedOptionId === '—' ? `Задание ${n}: у нескольких вариантов одинаковое значение — ответ не единственный` : `Задание ${n}: по расчёту верный вариант — ${c.expectedOptionId}`;
 }
 
 // ---------- Мягкие предупреждения для учителя (не блокируют сохранение) ----------
