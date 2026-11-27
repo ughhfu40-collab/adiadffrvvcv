@@ -1,10 +1,17 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { LanguageSchema, validateLesson } from '../shared/lesson';
+import { LanguageSchema, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
-const GenerateBody = z.object({ text: z.string().min(20, 'Текст слишком короткий (нужно от 20 символов)').max(6000), language: LanguageSchema, title: z.string().max(120).default('') });
+const GenerateBody = z.object({
+  text: z.string().trim()
+    .min(20, 'Текст слишком короткий (нужно от 20 символов)')
+    .max(6000)
+    .refine((t) => splitSentences(t).length >= MIN_SENTENCES, `Нужно минимум ${MIN_SENTENCES} предложения с буквами`),
+  language: LanguageSchema,
+  title: z.string().trim().max(120).default(''),
+});
 
 export function startCommand() {
   return `ollama serve & ollama pull ${OLLAMA_MODEL}`;

@@ -118,3 +118,21 @@ describe('сервер: качество, таймаут, отмена', () => {
     expect(TIMEOUT_MS).toBeGreaterThanOrEqual(600_000);
   });
 });
+
+describe('стресс-находки: пустой текст и уникальность ID', () => {
+  it('пробелы и точки отклоняются до вызова модели', async () => {
+    const spy = vi.fn();
+    const app = await buildApp({ fetchImpl: spy as unknown as typeof fetch });
+    for (const t of [' '.repeat(40), '   .   .   .   .   .   .   ', '\n\t'.repeat(15)]) {
+      const res = await app.inject({ method: 'POST', url: '/api/generate', payload: { text: t, language: 'ru' } });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it('500 одновременных генераций дают 500 разных ID', async () => {
+    const fake = (async () => new Response(JSON.stringify({ message: { content: JSON.stringify(goodTasks) } }))) as unknown as typeof fetch;
+    const res = await Promise.all(Array.from({ length: 500 }, () => generateLesson({ text, language: 'ru', title: '' }, fake)));
+    const ids = res.map((r) => (r.ok ? r.lesson.id : ''));
+    expect(new Set(ids).size).toBe(500);
+  });
+});

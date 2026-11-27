@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
+import { MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, type Health } from './api';
 import { db } from './db';
 import { useI18n } from './i18n';
@@ -151,7 +151,7 @@ export function Teacher() {
         </div>
         <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={busy || sentences.length < 3} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
+          <button className="btn" disabled={busy || sentences.length < MIN_SENTENCES} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
           {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
           {busy && (
             <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">

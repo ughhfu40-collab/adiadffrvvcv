@@ -217,3 +217,35 @@ test('урок учителя (kk, docs/pitch): t2 с s3 → «екінші де
   await page.getByText('← Сабақтарға').click();
   await expect(page.getByTestId('lesson-gen-kk-mwyhudoe')).toContainText('Выполнено 2 из 3');
 });
+
+test('одновременный импорт из двух вкладок: исходный урок и прогресс целы, версии получают свои ID', async ({ context }) => {
+  const base = (await import('../../lessons/ru-saiga.json', { with: { type: 'json' } })).default;
+  const a = await context.newPage(), b = await context.newPage();
+  await a.goto('/');
+  // Прогресс по исходному уроку.
+  await a.getByTestId('lesson-ru-saiga').click();
+  await answer(a, 'b', ['s1']);
+  await expect(a.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await a.goto('/');
+  await expect(a.getByTestId('lesson-ru-saiga')).toContainText('1 из 3');
+  await b.goto('/');
+  for (const p of [a, b]) await p.getByTestId('import-open').click();
+  const file = (title: string) => ({ name: `${title}.json`, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...base, title })) });
+  await Promise.all([a.getByTestId('import-file').setInputFiles(file('Версия A')), b.getByTestId('import-file').setInputFiles(file('Версия B'))]);
+  await expect(a.locator('[data-testid^="import-"][role="status"]')).toBeVisible();
+  await expect(b.locator('[data-testid^="import-"][role="status"]')).toBeVisible();
+  await a.reload();
+  await expect(a.getByTestId('lesson-ru-saiga')).toContainText('Возвращение сайгаков');
+  await expect(a.getByTestId('lesson-ru-saiga')).toContainText('1 из 3');
+  await expect(a.getByTestId('lesson-ru-saiga-v2')).toBeVisible();
+  await expect(a.getByTestId('lesson-ru-saiga-v3')).toBeVisible();
+  const titles = [await a.getByTestId('lesson-ru-saiga-v2').innerText(), await a.getByTestId('lesson-ru-saiga-v3').innerText()].join(' ');
+  expect(titles).toContain('Версия A');
+  expect(titles).toContain('Версия B');
+  // Повторный импорт того же файла не создаёт копию.
+  await a.getByTestId('import-open').click();
+  await a.getByTestId('import-file').setInputFiles(file('Версия A'));
+  await expect(a.getByTestId('import-same')).toBeVisible();
+  await a.reload();
+  await expect(a.locator('[data-testid^="lesson-ru-saiga"]')).toHaveCount(3);
+});

@@ -148,3 +148,33 @@ test('интерфейс переключается на қазақша и за�
   await page.getByTestId('ui-lang').click();
   await expect(page.getByText('Прогресс по навыкам')).toBeVisible();
 });
+
+test('разрыв соединения во время генерации: черновик и правки целы, повторный запрос успешен', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  await page.getByTestId('t-ev-0-s2').click();
+  await page.getByTestId('t-task-0').getByPlaceholder(/Вопрос/).fill('Правка учителя');
+  // Соединение рвётся на середине запроса генерации.
+  await page.route('**/api/generate', (route) => route.abort('connectionreset'), { times: 1 });
+  await page.getByTestId('t-text').fill('Альфа идёт. Бета идёт. Гамма идёт. Дельта идёт.');
+  await page.getByTestId('t-generate').click();
+  await expect(page.getByTestId('t-msg-server-down')).toBeVisible();
+  await expect(page.getByTestId('t-evidence-0')).toHaveValue('s2,s3');
+  await expect(page.getByTestId('t-task-0').getByPlaceholder(/Вопрос/)).toHaveValue('Правка учителя');
+  // После перезагрузки черновик восстанавливается из IndexedDB.
+  await page.reload();
+  await page.getByTestId('mode-teacher').click();
+  await expect(page.getByTestId('t-task-0').getByPlaceholder(/Вопрос/)).toHaveValue('Правка учителя');
+  // Повтор проходит.
+  await generate(page, 'Альфа идёт. Бета идёт. Гамма идёт. Дельта идёт.');
+  await expect(page.getByTestId('t-evidence-0')).toHaveValue('s4');
+});
+
+test('пустой текст из пробелов и точек: генерация недоступна, модель не вызывается', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/generate', (route) => { calls++; return route.continue(); });
+  await page.getByTestId('t-text').fill('   .   .   .   .   .   .   ');
+  await expect(page.getByTestId('t-generate')).toBeDisabled();
+  const res = await page.request.post('/api/generate', { data: { text: ' '.repeat(40), language: 'ru' } });
+  expect(res.status()).toBe(400);
+  expect(calls).toBe(0);
+});

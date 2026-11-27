@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
 
 export const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
@@ -143,6 +144,7 @@ export async function generateLesson(input: { text: string; language: Language; 
   } catch {
     return { ok: false, kind: 'structure', errors: ['Модель вернула не JSON'] };
   }
-  const slug = `gen-${input.language}-${Date.now().toString(36)}`;
+  // Время + случайный суффикс: параллельные запросы в одну миллисекунду получают разные ID.
+  const slug = `gen-${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
   return assembleDraft(raw, { id: slug, title: input.title || 'Новый урок', language: input.language }, sentences);
 }

@@ -103,9 +103,13 @@ export function splitSentences(text: string): { id: string; text: string }[] {
   const parts = normalized.match(/[^.!?…]+(?:[.!?…]+["»”)]*|$)/g) ?? [normalized];
   return parts
     .map((p) => p.trim())
-    .filter((p) => p.length > 0)
+    // Фрагменты без букв и цифр («...», « . ») — не предложения.
+    .filter((p) => /[\p{L}\p{N}]/u.test(p))
     .map((p, i) => ({ id: `s${i + 1}`, text: p }));
 }
+
+/** Минимум для генерации: три предложения с буквами. Проверяется и в интерфейсе, и на сервере до вызова модели. */
+export const MIN_SENTENCES = 3;
 
 // ---------- Проверка ответа ----------
 
