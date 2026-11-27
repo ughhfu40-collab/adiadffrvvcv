@@ -45,3 +45,27 @@ describe('качество новых черновиков не ломает с�
     for (const l of BUILTIN_LESSONS) expect(validateLesson(l).ok).toBe(true);
   });
 });
+
+describe('одновременный импорт двух разных уроков с одним ID', () => {
+  it('оба урока сохраняются: один под исходным ID, второй как -v2; ничего не перезаписано', async () => {
+    const d = new AppDB(`conc-${Math.random()}`);
+    const base = structuredClone(BUILTIN_LESSONS[0]!);
+    const a = { ...base, id: 'conc-x', title: 'Версия A' };
+    const b = { ...base, id: 'conc-x', title: 'Версия B' };
+    const [ra, rb] = await Promise.all([importLesson(a, d), importLesson(b, d)]);
+    expect([ra.status, rb.status].sort()).toEqual(['new', 'renamed']);
+    const rows = await d.lessons.where('id').startsWith('conc-x').toArray();
+    expect(rows.map((r) => r.id).sort()).toEqual(['conc-x', 'conc-x-v2']);
+    const titles = rows.map((r) => r.lesson.title).sort();
+    expect(titles.some((x) => x.startsWith('Версия A'))).toBe(true);
+    expect(titles.some((x) => x.startsWith('Версия B'))).toBe(true);
+  });
+  it('десять одновременных импортов разных версий — десять уроков без потерь', async () => {
+    const d = new AppDB(`conc10-${Math.random()}`);
+    const base = structuredClone(BUILTIN_LESSONS[1]!);
+    const versions = Array.from({ length: 10 }, (_, i) => ({ ...base, id: 'many', title: `V${i}` }));
+    const res = await Promise.all(versions.map((v) => importLesson(v, d)));
+    expect(res.filter((r) => r.status === 'new')).toHaveLength(1);
+    expect(await d.lessons.where('id').startsWith('many').count()).toBe(10);
+  });
+});

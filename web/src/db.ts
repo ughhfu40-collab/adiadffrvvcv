@@ -49,21 +49,28 @@ export type ImportOutcome =
 const stable = (v: unknown): string => JSON.stringify(v, (_k, x: unknown) =>
   x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : x);
 
-/** Импорт без потерь: существующий урок (и прогресс по его ID) никогда не перезаписывается. */
+/** Импорт без потерь: существующий урок (и прогресс по его ID) никогда не перезаписывается.
+ *  Проверка ID и запись — одна rw-транзакция Dexie: одновременные импорты с одним ID выполняются по очереди,
+ *  и второй гарантированно увидит первый. */
 export async function importLesson(lesson: Lesson, d: AppDB = db): Promise<ImportOutcome> {
-  const existing = await d.lessons.get(lesson.id);
-  if (!existing) {
-    await d.lessons.put({ id: lesson.id, lesson, source: 'imported', addedAt: Date.now() });
-    return { status: 'new', lesson };
-  }
-  if (stable(existing.lesson) === stable(lesson)) return { status: 'same', lesson: existing.lesson };
-  let n = 2;
-  while (await d.lessons.get(`${lesson.id}-v${n}`)) {
-    const other = (await d.lessons.get(`${lesson.id}-v${n}`))!.lesson;
-    if (stable({ ...other, id: lesson.id, title: lesson.title }) === stable(lesson)) return { status: 'same', lesson: other };
-    n++;
-  }
-  const copy: Lesson = { ...lesson, id: `${lesson.id}-v${n}`, title: `${lesson.title} (v${n})` };
-  await d.lessons.put({ id: copy.id, lesson: copy, source: 'imported', addedAt: Date.now() });
-  return { status: 'renamed', lesson: copy, originalId: lesson.id };
+  return d.transaction('rw', d.lessons, async (): Promise<ImportOutcome> => {
+    const existing = await d.lessons.get(lesson.id);
+    if (!existing) {
+      await d.lessons.add({ id: lesson.id, lesson, source: 'imported', addedAt: Date.now() });
+      return { status: 'new', lesson };
+    }
+    if (stable(existing.lesson) === stable(lesson)) return { status: 'same', lesson: existing.lesson };
+    for (let n = 2; ; n++) {
+      const id = `${lesson.id}-v${n}`;
+      const other = await d.lessons.get(id);
+      if (!other) {
+        const copy: Lesson = { ...lesson, id, title: `${lesson.title} (v${n})` };
+        // add, а не put: если ID внезапно занят, транзакция упадёт, а не перезапишет урок.
+        await d.lessons.add({ id, lesson: copy, source: 'imported', addedAt: Date.now() });
+        return { status: 'renamed', lesson: copy, originalId: lesson.id };
+      }
+      // Копия уже есть, только если совпадает всё, включая название (с пометкой vN).
+      if (stable(other.lesson) === stable({ ...lesson, id, title: `${lesson.title} (v${n})` })) return { status: 'same', lesson: other.lesson };
+    }
+  });
 }
