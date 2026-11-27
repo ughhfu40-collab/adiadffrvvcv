@@ -292,6 +292,7 @@ const PLAYER_TEXT = {
     recError: 'Не удалось загрузить рекомендацию. Вернись к урокам и выбери следующий.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
     textLabel: 'Текст', grade: '{g} класс', doneLead: 'Все задания решены: ответы выбраны и доказаны цитатами из текста.', recTitle: 'Потренируй навык',
     retry: 'Исправь то, что отмечено крестиком, и проверь ещё раз.',
+    retryAdd: 'Отмеченное предложение оставь и добавь ещё одно, потом проверь ещё раз.',
   },
   kk: {
     check: 'Тексеру', recheck: 'Қайта тексеру', next: 'Келесі тапсырма', finish: 'Сабақты аяқтау', hint: 'Кеңес',
@@ -305,15 +306,19 @@ const PLAYER_TEXT = {
     recError: 'Ұсынысты жүктеу мүмкін болмады. Сабақтарға оралып, келесісін таңда.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
     textLabel: 'Мәтін', grade: '{g}-сынып', doneLead: 'Барлық тапсырма орындалды: жауаптар таңдалып, мәтіннен дәлелденді.', recTitle: 'Дағдыны жаттықтыр',
     retry: 'Айқышпен белгіленгенді түзетіп, қайта тексер.',
+    retryAdd: 'Белгіленген сөйлемді қалдырып, тағы біреуін қос та, қайта тексер.',
   },
 } as const;
 
 const fill = (s: string, v: Record<string, string | number>) => s.replace(/\{(\w+)\}/g, (_, k: string) => String(v[k] ?? ''));
 
-function Mark({ ok }: { ok: boolean }) {
+/** ok — верно; partial — верно, но неполно (не хватает ещё одной цитаты); bad — неверно. */
+function Mark({ ok, partial = false, testId }: { ok: boolean; partial?: boolean; testId?: string }) {
+  const state = ok ? 'ok' : partial ? 'partial' : 'bad';
   return (
-    <span aria-hidden="true" className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-card ${ok ? 'bg-ok' : 'bg-bad'}`}>
-      <Icon name={ok ? 'check' : 'x'} className="h-4 w-4" />
+    <span aria-hidden="true" data-testid={testId} data-state={state}
+      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-card ${state === 'ok' ? 'bg-ok' : state === 'partial' ? 'bg-warn' : 'bg-bad'}`}>
+      <Icon name={state === 'ok' ? 'check' : state === 'partial' ? 'plus' : 'x'} className="h-4 w-4" />
     </span>
   );
 }
@@ -565,10 +570,10 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                     <Mark ok={result.answerCorrect} /><span data-testid="feedback-answer" data-ok={result.answerCorrect}>{parts.answer}</span>
                   </p>
                   <p className="flex items-center gap-2.5 font-medium">
-                    <Mark ok={result.evidence === 'correct'} /><span data-testid="feedback-evidence" data-ok={result.evidence === 'correct'}>{parts.evidence}</span>
+                    <Mark ok={result.evidence === 'correct'} partial={result.evidence === 'missing'} testId="feedback-evidence-mark" /><span data-testid="feedback-evidence" data-ok={result.evidence === 'correct'}>{parts.evidence}</span>
                   </p>
                   {parts.tip && <p className="flex items-start gap-2.5 text-sm text-ink" ><Icon name="bulb" className="mt-px h-5 w-5 text-warn" /><span data-testid="feedback-tip">{parts.tip}</span></p>}
-                  {!result.solved && <p className="pl-[34px] text-sm text-muted">{t.retry}</p>}
+                  {!result.solved && <p className="pl-[34px] text-sm text-muted" data-testid="feedback-retry">{result.answerCorrect && result.evidence === 'missing' ? t.retryAdd : t.retry}</p>}
                 </div>
               )}
               {result?.solved && evidence.length > 1 && <ProofTest task={task} lesson={lesson} evidence={evidence} order={order} />}

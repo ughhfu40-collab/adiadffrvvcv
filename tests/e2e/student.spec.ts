@@ -508,3 +508,25 @@ test('выбор класса: 7–9 класс, «Начать урок» бе�
   await page.getByTestId('grade-all').click();
   await expect(page.locator('[data-testid^="lesson-"]')).toHaveCount(8);
 });
+
+test('не хватает второй цитаты — это «неполно», а не «неверно»: жёлтый значок и подсказка добавить, неверная цитата — крестик', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('lesson-ru-garden').click();
+  // t1
+  await page.getByTestId('opt-a').check(); await page.getByTestId('sent-s1').click(); await page.getByTestId('check').click();
+  await page.getByTestId('next').click();
+  // t2: верный ответ и только s2 (как на скриншоте)
+  await page.getByTestId('opt-a').check(); await page.getByTestId('sent-s2').click(); await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-evidence', 'missing');
+  await expect(page.getByTestId('feedback-evidence-mark')).toHaveAttribute('data-state', 'partial');
+  await expect(page.getByTestId('feedback-retry')).toContainText('Отмеченное предложение оставь и добавь ещё одно');
+  await expect(page.getByTestId('feedback-retry')).not.toContainText('крестиком');
+  // Неверная цитата вместо s2 — уже ошибка: красный крестик и обычная подсказка.
+  await page.getByTestId('sent-s2').click(); await page.getByTestId('sent-s7').click(); await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback-evidence-mark')).toHaveAttribute('data-state', 'bad');
+  await expect(page.getByTestId('feedback-retry')).toContainText('крестиком');
+  // Правильно: s2 + s4
+  await page.getByTestId('sent-s7').click(); await page.getByTestId('sent-s2').click(); await page.getByTestId('sent-s4').click(); await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await expect(page.getByTestId('feedback-evidence-mark')).toHaveAttribute('data-state', 'ok');
+});
