@@ -116,3 +116,8 @@ export function splitDataLines(text: string): { id: string; text: string }[] {
 /** Разбивка исходного текста по разделу: чтение — по предложениям, математика — по строкам. */
 export const splitBySubject = (subject: Subject, text: string, splitSentences: (t: string) => { id: string; text: string }[]) =>
   subject === 'math' ? splitDataLines(text) : splitSentences(text);
+
+/** Неразрывные пробелы в числах и единицах: «2 000 ₸», «150 ₸», «20 ГБ» не разрываются переносом строки. */
+export function nbspNumbers(text: string): string {
+  return text.replace(/(\d) (?=\d{3}(\D|$))/g, '$1\u00a0').replace(/(\d) (?=(₸|ГБ|л|кг|шт|%))/g, '$1\u00a0');
+}

@@ -2,10 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useLiveQuery } from 'dexie-react-hooks';
 import { checkAnswer, DEFAULT_GRADE, feedbackParts, GRADES, GradeSchema, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Grade, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
-import { MATH_SKILL_LABELS, subjectOf, type Subject } from '../../shared/math';
+import { MATH_SKILL_LABELS, nbspNumbers, subjectOf, type Subject } from '../../shared/math';
 import { db, importLesson, readProgress, solvedKeys } from './db';
 import { PITCH_URL, useI18n } from './i18n';
 import { Icon, Spinner } from './Icon';
+import { Graphs } from './Graphs';
 
 type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 
@@ -42,6 +43,8 @@ export function Student() {
   const [play, setPlay] = useState<Play | null>(null);
   const [grade, setGrade] = useState(readGrade);
   const [subject, setSubject] = useState<Subject>(readSubject);
+  const [mathView, setMathView] = useState<'lessons' | 'graphs'>(() => { try { return localStorage.getItem('oqy-math-view') === 'graphs' ? 'graphs' : 'lessons'; } catch { return 'lessons'; } });
+  const selectMathView = (value: 'lessons' | 'graphs') => { setMathView(value); try { localStorage.setItem('oqy-math-view', value); } catch { /* Storage can be disabled. */ } };
   const selectSubject = (value: Subject) => {
     setSubject(value);
     try { localStorage.setItem(SUBJECT_KEY, value); } catch { /* Storage can be disabled. */ }
@@ -110,6 +113,16 @@ export function Student() {
         <HeroExample lang={lang} subject={subject} grade={start?.grade ?? (grade === 'all' ? DEFAULT_GRADE : grade)} />
       </section>
 
+      {subject === 'math' && (
+        <div role="tablist" aria-label={t('subjectMath')} className="-mb-6 inline-flex rounded-full border border-line-strong/50 bg-card p-1 sm:-mb-10" data-testid="math-view">
+          {(['lessons', 'graphs'] as const).map((v) => (
+            <button key={v} type="button" role="tab" aria-selected={mathView === v} data-testid={`math-view-${v}`}
+              className={`min-h-10 rounded-full px-4 text-sm ${mathView === v ? 'bg-ink font-semibold text-paper' : 'text-muted hover:bg-sunken hover:text-ink'}`}
+              onClick={() => selectMathView(v)}>{t(v === 'graphs' ? 'mathGraphs' : 'mathLessons')}</button>
+          ))}
+        </div>
+      )}
+      {subject === 'math' && mathView === 'graphs' ? <Graphs /> : <>
       <section aria-labelledby="lessons-title">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-4">
           <div>
@@ -183,6 +196,7 @@ export function Student() {
           ))}
         </ul>}
       </section>
+      </>}
     </div>
   );
 }
@@ -658,7 +672,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
               {result?.solved && math && task.solution && (
                 <div className="note note-ok" data-testid="solution" lang={lang}>
                   <Icon name="check" className="mt-px h-5 w-5" />
-                  <p><b>{MATH_PARTS[lang].calc}:</b> <span className="tabular-nums">{task.solution}</span></p>
+                  <p><b>{MATH_PARTS[lang].calc}:</b> <span className="tabular-nums">{nbspNumbers(task.solution)}</span></p>
                 </div>
               )}
               {result?.solved && evidence.length > 1 && <ProofTest task={task} lesson={lesson} evidence={evidence} order={order} />}
