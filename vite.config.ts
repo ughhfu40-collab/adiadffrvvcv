@@ -34,6 +34,7 @@ export default defineConfig({
       },
       // Шрифты: в precache только кириллица и латиница (в т.ч. казахские буквы в cyrillic-ext); прочие подмножества грузятся лишь при необходимости.
       workbox: {
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,svg,json}', '**/*-{latin,latin-ext,cyrillic,cyrillic-ext}-wght-normal-*.woff2'],
         globIgnores: ['version.json'],
         navigateFallback: 'index.html',
