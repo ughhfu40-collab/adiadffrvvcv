@@ -9,6 +9,12 @@ type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 
 const LANG_NAME: Record<Language, string> = { kk: 'Қазақша', ru: 'Русский' };
 const EMPTY_SOLVED = new Set<string>();
+type GradeFilter = 'all' | 7 | 8 | 9;
+const GRADES: GradeFilter[] = ['all', 7, 8, 9];
+const GRADE_KEY = 'oqy-grade';
+function readGrade(): GradeFilter {
+  try { const v = localStorage.getItem(GRADE_KEY); return v === '7' || v === '8' || v === '9' ? (Number(v) as GradeFilter) : 'all'; } catch { return 'all'; }
+}
 const firstUnsolved = (l: Lesson, solved: Set<string>) => l.tasks.findIndex((x) => !solved.has(`${l.id}/${x.id}`));
 
 /** «Начать урок»: задание 1 первого незавершённого урока на языке интерфейса; если все завершены — первого урока. */
@@ -26,12 +32,16 @@ export function Student() {
   const [play, setPlay] = useState<Play | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const importId = useId();
+  const [grade, setGradeState] = useState<GradeFilter>(readGrade);
+  const setGrade = (g: GradeFilter) => { setGradeState(g); try { localStorage.setItem(GRADE_KEY, String(g)); } catch { /* приватный режим */ } };
 
   if (play) return <Player key={play.lesson.id + play.taskIds.join() + (play.startIdx ?? 0)} play={play} all={all} onExit={() => setPlay(null)} onPlay={setPlay} />;
 
-  // Уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
-  const ordered = [...(rows ?? [])].sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang));
-  const start = progress === undefined ? null : pickStart(all, lang, solved);
+  // Выбранный класс; уроки на языке интерфейса — первыми, внутри — по классу (порядок в группе сохраняется).
+  const inGrade = (l: Lesson) => grade === 'all' || l.grade === grade;
+  const ordered = [...(rows ?? [])].filter((r) => inGrade(r.lesson))
+    .sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang) || a.lesson.grade - b.lesson.grade);
+  const start = progress === undefined ? null : pickStart(all.filter(inGrade), lang, solved);
   const startPlay = () => start && setPlay({ lesson: start, taskIds: start.tasks.map((x) => x.id) });
 
   return (
@@ -69,6 +79,16 @@ export function Student() {
           </button>
         </div>
         {importOpen && <div id={importId} className="mt-4"><ImportBox /></div>}
+        <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label={t('gradeFilter')} data-testid="grade-filter">
+          <span className="text-sm text-muted">{t('gradeFilter')}:</span>
+          {GRADES.map((g) => (
+            <button key={g} type="button" aria-pressed={grade === g} data-testid={`grade-${g}`} onClick={() => setGrade(g)}
+              className={`min-h-11 rounded-full px-4 text-sm ring-1 transition ${grade === g ? 'bg-brand text-on-brand ring-brand' : 'bg-card ring-line hover:bg-brand-soft'}`}>
+              {g === 'all' ? t('gradeAll') : t('grade', { g })}
+            </button>
+          ))}
+        </div>
+        {ordered.length === 0 && rows && <p className="mt-5 text-muted" data-testid="grade-empty">{t('gradeEmpty')}</p>}
         <ul className="mt-5 grid gap-4 sm:grid-cols-2">
           {ordered.map(({ lesson, source }) => {
             const done = lesson.tasks.filter((x) => solved.has(`${lesson.id}/${x.id}`)).length;

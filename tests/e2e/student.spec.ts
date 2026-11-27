@@ -172,6 +172,7 @@ test('главная → «Начать урок» одним нажатием; 
   await expect(start).toHaveText(/Начать урок/);
   // Кнопка видна без прокрутки (в том числе на телефоне); навыки — ниже списка уроков.
   await expect(start).toBeInViewport();
+  await page.getByTestId('grade-8').click();
   const lessonsY = (await page.getByTestId('lesson-ru-saiga').boundingBox())!.y;
   expect((await page.getByTestId('progress').boundingBox())!.y).toBeGreaterThan(lessonsY);
   await start.click();
@@ -236,6 +237,8 @@ test.describe('телефон 390×844 (касания)', () => {
   test('урок одним касанием, цитата, итоги, офлайн-перезапуск с прогрессом, ru и kk', async ({ page, context }) => {
     await page.goto('/');
     await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+    await page.getByTestId('grade-8').tap();
+    await page.evaluate(() => window.scrollTo(0, 0));
     await expect(page.getByTestId('start-lesson')).toBeInViewport();
     await page.getByTestId('start-lesson').tap();
     await expect(page.getByTestId('question')).toContainText('Когда у сайгаков');
@@ -479,4 +482,29 @@ test('после установки service worker версию сборки м�
   const response = await page.goto('/version.json');
   expect(response?.ok()).toBe(true);
   expect(await response?.json()).toMatchObject({ sha: expect.any(String), studentOnly: false });
+});
+
+test('выбор класса: 7–9 класс, «Начать урок» берёт урок выбранного класса, выбор сохраняется', async ({ page }) => {
+  await page.goto('/');
+  // Все классы: 8 встроенных уроков, по уроку на каждый язык в каждом классе.
+  await expect(page.locator('[data-testid^="lesson-"]')).toHaveCount(8);
+  for (const [g, ru, kk] of [[7, 'ru-garden', 'kk-feeder'], [8, 'ru-saiga', 'kk-library'], [9, 'ru-noise', 'kk-canteen']] as const) {
+    await page.getByTestId(`grade-${g}`).click();
+    await expect(page.getByTestId(`grade-${g}`)).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId(`lesson-${ru}`)).toBeVisible();
+    await expect(page.getByTestId(`lesson-${kk}`)).toBeVisible();
+    await expect(page.locator('[data-testid^="lesson-"]')).toHaveCount(g === 8 ? 4 : 2);
+  }
+  // 9 класс выбран — «Начать урок» открывает русский урок 9 класса.
+  await expect(page.getByTestId('start-caption')).toContainText('Тишина у школьных окон');
+  await page.reload();
+  await expect(page.getByTestId('grade-9')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('start-lesson').click();
+  await expect(page.getByTestId('question')).toContainText('автобусных маршрутов');
+  // Казахский интерфейс — казахский урок того же класса.
+  await page.getByText('← К урокам').click();
+  await page.getByTestId('ui-lang').click();
+  await expect(page.getByTestId('start-caption')).toContainText('Асханадағы тағам қалдықтары');
+  await page.getByTestId('grade-all').click();
+  await expect(page.locator('[data-testid^="lesson-"]')).toHaveCount(8);
 });

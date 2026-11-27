@@ -29,10 +29,19 @@ it('десятичная точка не разбивает предложени
 });
 
 describe('встроенные уроки', () => {
-  it('4 урока: 2 kk + 2 ru, по 3 задания на все навыки', () => {
-    expect(BUILTIN_LESSONS).toHaveLength(4);
-    expect(BUILTIN_LESSONS.filter((l) => l.language === 'kk')).toHaveLength(2);
+  it('8 уроков для 7–9 классов: в каждом классе есть казахский и русский, по 3 задания на все навыки', () => {
+    expect(BUILTIN_LESSONS).toHaveLength(8);
+    for (const g of [7, 8, 9]) for (const lang of ['kk', 'ru']) {
+      expect(BUILTIN_LESSONS.some((l) => l.grade === g && l.language === lang), `${g} ${lang}`).toBe(true);
+    }
     for (const l of BUILTIN_LESSONS) expect(l.tasks.map((t) => t.skill)).toEqual(['find', 'match', 'infer']);
+  });
+  it('во встроенных уроках сопоставление не засчитывается по одному предложению из набора', () => {
+    for (const l of BUILTIN_LESSONS) {
+      const m = l.tasks.find((t) => t.skill === 'match')!;
+      for (const sid of m.evidenceSets[0]!) expect(checkAnswer(m, m.correctOptionId, [sid]).solved, `${l.id} ${sid}`).toBe(false);
+      for (const set of m.evidenceSets) expect(checkAnswer(m, m.correctOptionId, set).solved, `${l.id} ${set}`).toBe(true);
+    }
   });
   it('в заданиях на сопоставление одно предложение не засчитывается', () => {
     for (const lesson of BUILTIN_LESSONS) {

@@ -11,7 +11,7 @@ describe('сохранение прогресса в IndexedDB', () => {
     await a.attempts.add({ lessonId: 'ru-saiga', taskId: 't1', skill: 'find', optionId: 'b', evidence: ['s1'], answerCorrect: true, evidenceOk: true, solved: true, at: 2 });
     a.close();
     const b = new AppDB(name);
-    expect(await b.lessons.count()).toBe(4);
+    expect(await b.lessons.count()).toBe(BUILTIN_LESSONS.length);
     const p = await readProgress(b);
     expect(p.skills.find).toEqual({ attempts: 2, solved: 1, errors: 1 });
     expect(p.skills.infer.attempts).toBe(0);
@@ -36,7 +36,7 @@ describe('импорт урока с уже существующим ID', () => 
     expect(await d.attempts.where('lessonId').equals(original.id).count()).toBe(1);
     // Повторный импорт той же изменённой версии не плодит копии
     expect((await importLesson(changed, d)).status).toBe('same');
-    expect(await d.lessons.count()).toBe(5);
+    expect(await d.lessons.count()).toBe(BUILTIN_LESSONS.length + 1);
   });
 });
 
