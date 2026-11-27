@@ -74,6 +74,22 @@ export function isEditableDraft(data: unknown): data is Lesson {
   return LessonBaseSchema.safeParse(data).success;
 }
 
+const StoredDraftSchema = LessonBaseSchema.extend({
+  title: z.string(),
+  tasks: z.array(TaskSchema.extend({
+    question: z.string(),
+    options: z.array(OptionSchema.extend({ text: z.string() })).min(2).max(6),
+    evidenceSets: z.array(z.array(z.string().min(1))),
+    hint: z.string(),
+  })).min(1),
+});
+
+/** A draft can be reopened while it still has blanks or incomplete evidence. */
+export function readStoredDraft(data: unknown): Lesson | null {
+  const parsed = StoredDraftSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
+}
+
 export type ValidationResult = { ok: true; lesson: Lesson } | { ok: false; errors: string[] };
 
 export function formatIssues(error: z.ZodError): string[] {
@@ -307,7 +323,7 @@ const stems = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).fi
 
 /**
  * Сопоставление, которое на деле отвечается одним предложением: почти все основы слов правильного варианта
- * есть в одном из предложений-доказательств. Эвристика — подсказывает учителю, что проверить; решение за ним.
+ * есть в одном из предложений текста. Это подсказка для учителя.
  */
 export function qualityWarnings(lesson: Pick<Lesson, 'tasks' | 'sentences'>, threshold = 0.8): QualityWarning[] {
   const text = new Map(lesson.sentences.map((s) => [s.id, new Set(stems(s.text))]));
@@ -317,9 +333,7 @@ export function qualityWarnings(lesson: Pick<Lesson, 'tasks' | 'sentences'>, thr
     const answer = stems(t.options.find((o) => o.id === t.correctOptionId)?.text ?? '');
     if (answer.length < 2) return;
     let best: QualityWarning | null = null;
-    for (const sid of new Set(t.evidenceSets.flat())) {
-      const st = text.get(sid);
-      if (!st) continue;
+    for (const [sid, st] of text) {
       const overlap = answer.filter((w) => st.has(w)).length / answer.length;
       if (overlap >= threshold && (!best || overlap > best.overlap)) best = { code: 'answer-in-one-sentence', taskIndex: i, sentenceId: sid, overlap: +overlap.toFixed(2) };
     }

@@ -148,7 +148,7 @@ describe('сервер: качество, таймаут, отмена', () => {
   it('промпт содержит пример сопоставления из двух предложений на языке урока', () => {
     const p = buildPrompt('kk', sentences);
     expect(p).toContain('Айгерім');
-    expect(p).toContain('"evidenceSets":[["s2","s3"]]');
+    expect(p).toContain('"evidenceSets":[["s1","s2"]]');
     expect(p).toContain('s3: Осенью');
   });
   const hanging = ((_u: string, init: RequestInit) => new Promise((_res, rej) => {

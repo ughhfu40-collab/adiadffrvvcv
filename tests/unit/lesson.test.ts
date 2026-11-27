@@ -140,6 +140,13 @@ describe('мягкое предупреждение: сопоставление 
     expect(qualityWarnings(draft('docs/gemma-run-qa/ru-radio.json'))).toEqual([]);
     for (const l of BUILTIN_LESSONS) expect(qualityWarnings(l), l.id).toEqual([]);
   });
+  it('находит полный ответ за пределами выбранных доказательств', () => {
+    const lesson = draft('docs/gemma-run-qa/ru-radio.json') as Lesson;
+    const task = lesson.tasks[1]!;
+    const answer = task.options.find((option) => option.id === task.correctOptionId)!.text;
+    lesson.sentences.push({ id: 'summary', text: answer });
+    expect(qualityWarnings(lesson)).toMatchObject([{ taskIndex: 1, sentenceId: 'summary' }]);
+  });
 });
 
 describe('исправленный учителем t2 (s3 + s4) не помечается', () => {

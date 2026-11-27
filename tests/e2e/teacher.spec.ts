@@ -48,6 +48,63 @@ test('e2e работает только с поддельной моделью, 
   expect(health.timeoutSec).toBe(5);
 });
 
+test('незаполненный ручной черновик восстанавливается после офлайн-перезагрузки', async ({ page, context }) => {
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  const question = 'Как меняется расписание?';
+  await page.getByTestId('t-title').fill('Расписание');
+  await page.getByTestId('t-text').fill('Первая встреча состоится утром. Вторую встречу перенесли на вечер.');
+  await page.getByRole('button', { name: 'Составить вручную' }).click();
+  await page.getByTestId('t-task-0').getByPlaceholder('Вопрос').fill(question);
+  await page.waitForFunction(expected => new Promise<boolean>(resolve => {
+    const open = indexedDB.open('oqy-reader');
+    open.onerror = () => resolve(false);
+    open.onsuccess = () => {
+      const db = open.result;
+      const read = db.transaction('drafts').objectStore('drafts').get('current');
+      read.onerror = () => { db.close(); resolve(false); };
+      read.onsuccess = () => {
+        db.close();
+        resolve(read.result?.data?.tasks?.[0]?.question === expected);
+      };
+    };
+  }), question);
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByTestId('mode-teacher').click();
+  await expect(page.getByTestId('t-task-0').getByPlaceholder('Вопрос')).toHaveValue(question, { timeout: 4000 });
+  await expect(page.getByTestId('t-save')).toBeDisabled();
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+});
+
+test('черновик с повтором и пропуском типа можно исправить и экспортировать', async ({ page }) => {
+  await generate(page, 'МАРКЕР-ДУБЛЬ начинается урок. Второе предложение. Третье предложение.');
+  await expect(page.getByTestId('t-quality')).toContainText('Нет задания типа «Сделать вывод»');
+  await page.getByTestId('t-remove-task-2').click({ timeout: 4000 });
+  await page.getByTestId('t-add-task').click();
+  const task = page.getByTestId('t-task-2');
+  await expect(task.getByRole('combobox')).toHaveValue('infer');
+  await task.getByPlaceholder('Вопрос').fill('Какой вывод можно сделать?');
+  await task.getByPlaceholder('Подсказка').fill('Свяжи первое и второе предложения.');
+  await task.getByRole('textbox', { name: 'Вариант a', exact: true }).fill('Верный вариант');
+  await task.getByRole('textbox', { name: 'Вариант b', exact: true }).fill('Неверный вариант');
+  await task.getByRole('textbox', { name: 'Вариант c', exact: true }).fill('Ещё один вариант');
+  await page.getByTestId('t-ev-2-s1').click();
+  await page.getByTestId('t-ev-2-s2').click();
+  const lesson = await exportJson(page);
+  expect(lesson.tasks.map(t => t.skill)).toEqual(['find', 'match', 'infer']);
+  expect(lesson.tasks[2]?.evidenceSets).toEqual([['s1', 's2']]);
+});
+
+test('повреждённый статус API не ломает редактор и ручной черновик доступен', async ({ page }) => {
+  await page.getByTestId('mode-student').click();
+  await page.route('**/api/health', route => route.fulfill({ json: { server: 'ok' } }));
+  await page.getByTestId('mode-teacher').click();
+  await expect(page.getByTestId('t-health')).toContainText('Сервер генерации недоступен', { timeout: 4000 });
+  await page.getByTestId('t-text').fill('Первое предложение. Второе предложение.');
+  await page.getByRole('button', { name: 'Составить вручную' }).click();
+  await expect(page.getByTestId('t-task-0')).toBeVisible();
+});
+
 test('два черновика подряд: поле доказательств и экспорт показывают второй', async ({ page }) => {
   await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
   await expect(page.getByTestId('t-evidence-0')).toHaveValue('s3');

@@ -18,6 +18,7 @@ function reply(full: string): unknown {
   if (prompt.includes('МАРКЕР-OPTIONS')) return { tasks: [task('t1', 'find', [['s1']], { options: null })] };
   if (prompt.includes('МАРКЕР-ID')) return { tasks: [task('t1', 'find', [['s99']]), task('t2', 'match', [['s1', 's2']], { correctOptionId: 'z' }), task('t3', 'infer', [['s2', last]])] };
   if (prompt.includes('МАРКЕР-QUALITY')) return { tasks: [task('t1', 'find', [['s1']]), task('t2', 'match', [['s2']]), task('t3', 'infer', [['s1', 's2']])] };
+  if (prompt.includes('МАРКЕР-ДУБЛЬ')) return { tasks: [task('t1', 'find', [['s1']]), task('t2', 'match', [['s1', 's2']]), task('t3', 'match', [['s2', 's3']])] };
   // Корректный черновик: доказательства зависят от числа предложений, чтобы два черновика различались.
   return { tasks: [task('t1', 'find', [[last]]), task('t2', 'match', [['s1', last]]), task('t3', 'infer', [['s1', 's2'], ['s2', last]])] };
 }

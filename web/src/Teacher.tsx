@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { qualityWarnings, qualityWarningText, MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
+import { qualityWarnings, qualityWarningText, MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, type Health } from './api';
 import { db } from './db';
 import { useI18n } from './i18n';
@@ -26,6 +26,7 @@ export function Teacher() {
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const [draft, setDraft] = useState<Lesson | null>(null);
+  const [loadingDraft, setLoadingDraft] = useState(true);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [structErrors, setStructErrors] = useState<string[]>([]);
   const [genMsg, setGenMsg] = useState<GenMessage | null>(null);
@@ -39,11 +40,22 @@ export function Teacher() {
 
   useEffect(() => {
     let active = true;
-    void getHealth().then(setHealth);
+    void getHealth().then((result) => { if (active) setHealth(result); });
     void db.drafts.get('current').then(
-      (d) => { if (active && d && isEditableDraft(d.data)) loadDraft(d.data); },
+      (row) => {
+        if (!active || !row) return;
+        const restored = readStoredDraft(row.data);
+        if (!restored) {
+          setDraftStorageError(true);
+          return;
+        }
+        setText(restored.sentences.map((sentence) => sentence.text).join('\n'));
+        setTitle(restored.title);
+        setLanguage(restored.language);
+        loadDraft(restored);
+      },
       () => { if (active) setDraftStorageError(true); },
-    );
+    ).finally(() => { if (active) setLoadingDraft(false); });
     return () => { active = false; abortRef.current?.abort(); };
   }, []);
   useEffect(() => {
@@ -63,8 +75,10 @@ export function Teacher() {
     return () => clearInterval(id);
   }, [busy]);
 
-  const validation = draft ? validateLesson(draft) : null;
-  const issues: QualityIssue[] = validation?.ok ? qualityIssues(validation.lesson) : [];
+  const validation = useMemo(() => draft ? validateLesson(draft) : null, [draft]);
+  const issues = useMemo(() => draft ? qualityIssues(draft) : [], [draft]);
+  const warnings = useMemo(() => validation?.ok ? qualityWarnings(validation.lesson) : [], [validation]);
+  const missingSkill = issues.find((issue) => issue.code === 'missing-skill');
   const canSave = !!validation?.ok && issues.length === 0;
   const ollamaOk = health && 'ollama' in health && health.ollama.ok;
   const limitSec = health && 'timeoutSec' in health && health.timeoutSec ? health.timeoutSec : 600;
@@ -100,6 +114,14 @@ export function Teacher() {
   }
 
   const updTask = (i: number, patch: Partial<Task>) => setDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+
+  function addMissingTask() {
+    if (!draft || !missingSkill || draft.tasks.length >= 3) return;
+    const taskIds = new Set(draft.tasks.map((task) => task.id));
+    let number = 1;
+    while (taskIds.has(`t${number}`)) number++;
+    setDraft({ ...draft, tasks: [...draft.tasks, emptyTask(number, missingSkill.skill)] });
+  }
 
   async function save() {
     if (!draft || !canSave || !validation?.ok || saving) return;
@@ -163,12 +185,12 @@ export function Teacher() {
       <section id="t-step-1" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-1-title">
         <StepTitle n={1} id="t-step-1-title">{t('tText')}</StepTitle>
         <div className="flex flex-wrap gap-2">
-          <input className="input min-w-0 flex-1" placeholder={t('tTitle')} aria-label={t('tTitle')} value={title} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
-          <select className="input" value={language} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
+          <input className="input min-w-0 flex-1" placeholder={t('tTitle')} aria-label={t('tTitle')} value={title} disabled={loadingDraft} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
+          <select className="input" value={language} disabled={loadingDraft} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
             <option value="ru">Русский</option><option value="kk">Қазақша</option>
           </select>
         </div>
-        <textarea className="input h-44 w-full font-serif text-[1.05rem] leading-7" placeholder={t('tPaste')} aria-label={t('tPaste')} value={text} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
+        <textarea className="input h-44 w-full font-serif text-[1.05rem] leading-7" placeholder={t('tPaste')} aria-label={t('tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
         {sentences.length > 0 && (
           <ol className="space-y-1 rounded-xl bg-paper p-3 font-serif text-[0.95rem]" data-testid="t-preview">
             {sentences.map((s) => <li key={s.id} className="flex gap-2"><span className="mt-0.5 shrink-0 font-sans text-xs font-semibold text-brand-ink">{s.id}</span><span>{s.text}</span></li>)}
@@ -182,7 +204,7 @@ export function Teacher() {
         </div>
         <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={busy || sentences.length < MIN_SENTENCES} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
+          <button className="btn" disabled={loadingDraft || busy || sentences.length < MIN_SENTENCES} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
           {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
           {busy && (
             <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">
@@ -190,7 +212,7 @@ export function Teacher() {
               {t('tElapsed', { time: mmss(elapsed), limit: mmss(limitSec) })}
             </span>
           )}
-          {!busy && <button className="btn-ghost" disabled={sentences.length < 2} onClick={manualDraft}>{t('tManual')}</button>}
+          {!busy && <button className="btn-ghost" disabled={loadingDraft || sentences.length < 2} onClick={manualDraft}>{t('tManual')}</button>}
           {!ollamaOk && !busy && <span className="text-xs text-muted">{t('tNoModel')}</span>}
         </div>
         {genMsg && (
@@ -226,7 +248,7 @@ export function Teacher() {
             <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);
-              const taskWarnings = validation?.ok ? qualityWarnings(validation.lesson).filter((w) => w.taskIndex === i) : [];
+              const taskWarnings = warnings.filter((w) => w.taskIndex === i);
               const taskErrors = allErrors.filter((e) => taskOf(e) === i);
               const flagged = taskIssues.length > 0 || taskErrors.length > 0;
               return (
@@ -257,15 +279,22 @@ export function Teacher() {
                       <div key={k} className="flex items-center gap-2">
                         <input type="radio" className="h-4 w-4 accent-[rgb(var(--brand))]" name={`correct-${rev}-${i}`} checked={task.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title={t('tCorrect')} aria-label={`${t('tCorrect')}: ${o.id}`} />
                         <span className="w-4 font-mono text-xs text-muted">{o.id}</span>
-                        <input className="input min-w-0 flex-1" value={o.text} onChange={(e) => updTask(i, { options: task.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
+                        <input className="input min-w-0 flex-1" aria-label={t('tOption', { id: o.id })} value={o.text} onChange={(e) => updTask(i, { options: task.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
                       </div>
                     ))}
                   </div>
                   <EvidenceEditor index={i} sentences={draft.sentences} sets={task.evidenceSets} onChange={(evidenceSets) => updTask(i, { evidenceSets })} />
                   <input className="input w-full" placeholder={t('tHint')} aria-label={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
+                  {draft.tasks.length > 1 && (
+                    <button type="button" className="btn-ghost text-bad" data-testid={`t-remove-task-${i}`}
+                      onClick={() => loadDraft({ ...draft, tasks: draft.tasks.filter((_, index) => index !== i) })}>{t('tRemoveTask')}</button>
+                  )}
                 </fieldset>
               );
             })}
+            {missingSkill && draft.tasks.length < 3 && (
+              <button type="button" className="btn-ghost" data-testid="t-add-task" onClick={addMissingTask}>{t('tAddTask')}</button>
+            )}
           </>
         )}
       </section>
