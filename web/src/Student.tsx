@@ -10,15 +10,10 @@ type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 const LANG_NAME: Record<Language, string> = { kk: 'Қазақша', ru: 'Русский' };
 const firstUnsolved = (l: Lesson, solved: Set<string>) => l.tasks.findIndex((x) => !solved.has(`${l.id}/${x.id}`));
 
-/** «Начать урок»: первый незавершённый урок на языке интерфейса (с первого нерешённого задания), иначе первый урок. */
-export function pickStart(lessons: Lesson[], lang: Language, solved: Set<string>): { lesson: Lesson; idx: number } | null {
+/** «Начать урок»: задание 1 первого незавершённого урока на языке интерфейса; если все завершены — первого урока. */
+export function pickStart(lessons: Lesson[], lang: Language, solved: Set<string>): Lesson | null {
   const own = lessons.filter((l) => l.language === lang);
-  for (const l of own) {
-    const i = firstUnsolved(l, solved);
-    if (i >= 0) return { lesson: l, idx: i };
-  }
-  const l = own[0] ?? lessons[0];
-  return l ? { lesson: l, idx: 0 } : null;
+  return own.find((l) => firstUnsolved(l, solved) >= 0) ?? own[0] ?? lessons[0] ?? null;
 }
 
 export function Student() {
@@ -35,7 +30,7 @@ export function Student() {
   // Уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
   const ordered = [...rows].sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang));
   const start = pickStart(ordered.map((r) => r.lesson), lang, solved);
-  const startPlay = () => start && setPlay({ lesson: start.lesson, taskIds: start.lesson.tasks.map((x) => x.id), startIdx: start.idx });
+  const startPlay = () => start && setPlay({ lesson: start, taskIds: start.tasks.map((x) => x.id) });
 
   return (
     <div className="space-y-14 pt-6 sm:space-y-20 sm:pt-12">
@@ -50,7 +45,7 @@ export function Student() {
             </button>
             {start && (
               <p className="text-sm text-muted" data-testid="start-caption">
-                <span lang={start.lesson.language}>{t('startCaption', { title: start.lesson.title, n: start.idx + 1, total: start.lesson.tasks.length })}</span>
+                <span lang={start.language}>{t('startCaption', { title: start.title, total: start.tasks.length })}</span>
               </p>
             )}
           </div>
@@ -161,6 +156,7 @@ function ImportBox() {
   const { t } = useI18n();
   const [errors, setErrors] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'same' | 'renamed'; text: string } | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   async function handle(raw: string) {
     setMsg(null);
     const r = parseLessonJson(raw);
@@ -175,9 +171,15 @@ function ImportBox() {
     <div className="card border-dashed">
       <h3 className="font-serif text-lg font-semibold">{t('importTitle')}</h3>
       <p className="mt-1 text-sm text-muted">{t('importHint')}</p>
-      <input type="file" accept="application/json,.json" data-testid="import-file" aria-label={t('importTitle')}
-        className="mt-3 block w-full text-sm text-muted file:mr-3 file:cursor-pointer file:rounded-xl file:border-0 file:bg-brand file:px-4 file:py-2.5 file:font-semibold file:text-on-brand hover:file:brightness-110"
-        onChange={async (e) => { const f = e.target.files?.[0]; if (f) await handle(await f.text()); e.target.value = ''; }} />
+      {/* Своя подписанная кнопка вместо системного «Choose File»; сам input (data-testid=import-file) остаётся в DOM и доступен с клавиатуры. */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <label className="btn cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink">
+          <input type="file" accept="application/json,.json" data-testid="import-file" className="sr-only"
+            onChange={async (e) => { const f = e.target.files?.[0]; if (f) { setFileName(f.name); await handle(await f.text()); } e.target.value = ''; }} />
+          <span aria-hidden="true">↥</span> {t('importChoose')}
+        </label>
+        <span className="min-w-0 break-all text-sm text-muted" data-testid="import-filename">{fileName ? t('importFile', { name: fileName }) : t('importNoFile')}</span>
+      </div>
       {msg && (
         <p role="status" data-testid={msg.kind === 'ok' ? 'import-ok' : `import-${msg.kind}`}
           className={`mt-3 rounded-xl p-3 text-sm ${msg.kind === 'ok' ? 'bg-ok-soft text-ok' : 'bg-brand-soft text-ink'}`}>{msg.text}</p>
@@ -197,7 +199,7 @@ const PLAYER_TEXT = {
     check: 'Проверить', recheck: 'Проверить ещё раз', next: 'Следующее задание', finish: 'Завершить урок', hint: 'Подсказка',
     textHint: 'Нажми на предложение, которое подтверждает ответ, — оно выделится маркером. Нажми ещё раз, чтобы снять.',
     step1: 'Выбери ответ', step2: 'Отметь доказательство в тексте', noQuote: 'Пока ничего не отмечено.',
-    toText: '↑ К тексту', toQuestion: '↓ К вопросу', marked: 'Отмечено: {n}', remove: 'Снять отметку с предложения {n}',
+    toText: '↓ К тексту', toQuestion: '↑ К вопросу', marked: 'Отмечено: {n}', remove: 'Снять отметку с предложения {n}',
     needBoth: 'Чтобы проверить, выбери ответ и отметь хотя бы одно предложение.',
     done: 'Урок пройден!', more: 'Ещё одно задание', back: 'К урокам', task: 'Задание {n} из {total}',
     weak: 'Навык с ошибками:', noRec: 'Без ошибок — дополнительное задание не нужно.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
@@ -206,7 +208,7 @@ const PLAYER_TEXT = {
     check: 'Тексеру', recheck: 'Қайта тексеру', next: 'Келесі тапсырма', finish: 'Сабақты аяқтау', hint: 'Кеңес',
     textHint: 'Жауапты дәлелдейтін сөйлемді бас — ол маркермен белгіленеді. Белгіні алу үшін қайта бас.',
     step1: 'Жауапты таңда', step2: 'Мәтіннен дәлелді белгіле', noQuote: 'Әзірге ештеңе белгіленбеген.',
-    toText: '↑ Мәтінге', toQuestion: '↓ Сұраққа', marked: 'Белгіленді: {n}', remove: '{n}-сөйлемнің белгісін алу',
+    toText: '↓ Мәтінге', toQuestion: '↑ Сұраққа', marked: 'Белгіленді: {n}', remove: '{n}-сөйлемнің белгісін алу',
     needBoth: 'Тексеру үшін жауапты таңдап, кемінде бір сөйлемді белгіле.',
     done: 'Сабақ аяқталды!', more: 'Тағы бір тапсырма', back: 'Сабақтарға', task: '{total} тапсырманың {n}-сі',
     weak: 'Қатесі бар дағды:', noRec: 'Қатесіз — қосымша тапсырма керек емес.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
@@ -247,7 +249,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
     })();
   }, [finished, all, lesson]);
 
-  // Новое задание на телефоне: показываем вопрос с начала (текст выше, к нему ведёт «К тексту»).
+  // Новое задание на телефоне: показываем вопрос с начала (текст ниже, к нему ведёт «К тексту»).
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return; }
     if (window.innerWidth < 1024) questionRef.current?.scrollIntoView({ block: 'start' });
@@ -271,7 +273,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   };
   const goText = () => { textRef.current?.scrollIntoView({ block: 'start' }); textRef.current?.focus({ preventScroll: true }); };
   const goQuestion = () => { questionRef.current?.scrollIntoView({ block: 'start' }); questionRef.current?.focus({ preventScroll: true }); };
-  const parts = result ? feedbackParts(lang, result) : null;
+  const parts = result && task ? feedbackParts(lang, result, task) : null;
   const isLast = idx + 1 >= tasks.length;
 
   return (
@@ -291,33 +293,6 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
       )}
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] lg:items-start lg:gap-8">
-        <article ref={textRef} tabIndex={-1} id="lesson-text" className="card scroll-mt-4 p-5 sm:p-8" data-testid="text">
-          {!finished && (
-            <p className="mb-4 flex items-start gap-2 rounded-xl bg-paper p-3 text-sm text-muted" data-testid="text-hint">
-              <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-6 shrink-0 rounded bg-marker" />
-              <span>{t.textHint}</span>
-            </p>
-          )}
-          <p className="font-serif text-[1.13rem] leading-[2.05rem] sm:text-[1.2rem] sm:leading-[2.2rem]">
-            {lesson.sentences.map((s, i) => {
-              const on = evidence.includes(s.id);
-              return (
-                <span key={s.id}>
-                  <button type="button" data-testid={`sent-${s.id}`} aria-pressed={on} disabled={finished} onClick={() => toggle(s.id)} className="sent">
-                    <span className="sent-num" aria-hidden="true">{on ? '✓' : i + 1}</span>
-                    <span className="sr-only">{t.sentence} {i + 1}: </span>{s.text}
-                  </button>{' '}
-                </span>
-              );
-            })}
-          </p>
-          {!finished && (
-            <div className="mt-5 flex items-center justify-between gap-3 border-t border-line pt-4 lg:hidden">
-              <span className="text-sm text-muted" data-testid="marked-count">{fill(t.marked, { n: evidence.length })}</span>
-              <button type="button" className="btn-ghost" data-testid="to-question" onClick={goQuestion}>{t.toQuestion}</button>
-            </div>
-          )}
-        </article>
 
         <section ref={questionRef} tabIndex={-1} className="card scroll-mt-4 p-5 sm:p-7 lg:sticky lg:top-4" aria-label={task?.question}>
           {finished ? (
@@ -380,7 +355,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                         );
                       })}
                     </ul>
-                    {!result?.solved && <button type="button" className="text-sm font-medium text-brand-ink underline underline-offset-4 lg:hidden" onClick={goText}>{t.toText}</button>}
+                    {!result?.solved && <button type="button" className="text-sm font-medium text-brand-ink underline underline-offset-4 lg:hidden" data-testid="to-text" onClick={goText}>{t.toText}</button>}
                   </div>
                 )}
               </div>
@@ -409,6 +384,34 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
             </div>
           ) : null}
         </section>
+
+        <article ref={textRef} tabIndex={-1} id="lesson-text" className="card scroll-mt-4 p-5 sm:p-8 lg:order-first" data-testid="text">
+          {!finished && (
+            <p className="mb-4 flex items-start gap-2 rounded-xl bg-paper p-3 text-sm text-muted" data-testid="text-hint">
+              <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-6 shrink-0 rounded bg-marker" />
+              <span>{t.textHint}</span>
+            </p>
+          )}
+          <p className="font-serif text-[1.13rem] leading-[2.05rem] sm:text-[1.2rem] sm:leading-[2.2rem]">
+            {lesson.sentences.map((s, i) => {
+              const on = evidence.includes(s.id);
+              return (
+                <span key={s.id}>
+                  <button type="button" data-testid={`sent-${s.id}`} aria-pressed={on} disabled={finished} onClick={() => toggle(s.id)} className="sent">
+                    <span className="sent-num" aria-hidden="true">{on ? '✓' : i + 1}</span>
+                    <span className="sr-only">{t.sentence} {i + 1}: </span>{s.text}
+                  </button>{' '}
+                </span>
+              );
+            })}
+          </p>
+          {!finished && (
+            <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 flex items-center justify-between gap-3 rounded-b-2xl border-t border-line bg-card/95 px-5 py-3 backdrop-blur sm:-mx-8 sm:-mb-8 sm:px-8 lg:hidden">
+              <span className="text-sm text-muted" data-testid="marked-count">{fill(t.marked, { n: evidence.length })}</span>
+              <button type="button" className="btn-ghost" data-testid="to-question" onClick={goQuestion}>{t.toQuestion}</button>
+            </div>
+          )}
+        </article>
       </div>
     </div>
   );

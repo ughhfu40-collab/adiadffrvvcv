@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { checkAnswer, feedbackParts, feedbackText, parseLessonJson, recommendNext, splitSentences, validateLesson, type Lesson } from '../../shared/lesson';
+import { checkAnswer, feedbackParts, feedbackText, parseLessonJson, LessonSchema, recommendNext, splitSentences, validateLesson, type Lesson } from '../../shared/lesson';
+import pitchKk from '../../docs/pitch/lesson-kk-after-teacher.json';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 
 const saiga = BUILTIN_LESSONS.find((l) => l.id === 'ru-saiga')!;
@@ -17,7 +18,7 @@ describe('проверка ответа и доказательства отде
   it('верный ответ + неверное доказательство → не решено, просим уточнить', () => {
     const r = checkAnswer(find, 'b', ['s3']);
     expect(r).toEqual({ answerCorrect: true, evidence: 'wrong', solved: false });
-    expect(feedbackText('ru', r)).toMatch(/Ответ верный.*не подтверждает/);
+    expect(feedbackText('ru', r, find)).toMatch(/Ответ верный.*не подтверждает/);
   });
   it('неверный ответ + верное доказательство → не решено', () => {
     const r = checkAnswer(find, 'a', ['s1']);
@@ -35,7 +36,7 @@ describe('проверка ответа и доказательства отде
     expect(checkAnswer(match, 'c', ['s4', 's3']).solved).toBe(false);
   });
   it('казахский отзыв', () => {
-    expect(feedbackText('kk', checkAnswer(find, 'b', ['s2']))).toMatch(/Жауап дұрыс/);
+    expect(feedbackText('kk', checkAnswer(find, 'b', ['s2']), find)).toMatch(/Жауап дұрыс/);
   });
 });
 
@@ -82,14 +83,34 @@ describe('разбиение и рекомендации', () => {
 
 describe('два отдельных итога проверки', () => {
   it('ответ и доказательство оцениваются по отдельности (ru)', () => {
-    expect(feedbackParts('ru', checkAnswer(find, 'a', ['s1']))).toMatchObject({ answer: 'Ответ неверный', evidence: 'Доказательство верное' });
-    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s3']))).toMatchObject({ answer: 'Ответ верный', evidence: 'Цитата не подтверждает ответ' });
-    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1', 's2'])).evidence).toBe('Лишнее предложение');
-    expect(feedbackParts('ru', checkAnswer(match, 'c', ['s5'])).evidence).toBe('Доказательства пока не хватает');
-    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1']))).toEqual({ answer: 'Ответ верный', evidence: 'Доказательство верное', tip: null });
+    expect(feedbackParts('ru', checkAnswer(find, 'a', ['s1']), find)).toMatchObject({ answer: 'Ответ неверный', evidence: 'Доказательство верное' });
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s3']), find)).toMatchObject({ answer: 'Ответ верный', evidence: 'Цитата не подтверждает ответ' });
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1', 's2']), find).evidence).toBe('Лишнее предложение');
+    expect(feedbackParts('ru', checkAnswer(match, 'c', ['s5']), match).evidence).toBe('Доказательства пока не хватает');
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1']), find)).toEqual({ answer: 'Ответ верный', evidence: 'Доказательство верное', tip: null });
   });
   it('казахские строки', () => {
-    expect(feedbackParts('kk', checkAnswer(find, 'a', ['s3']))).toMatchObject({ answer: 'Жауап қате', evidence: 'Үзінді жауапты дәлелдемейді' });
-    expect(feedbackParts('kk', checkAnswer(find, 'b', ['s1']))).toMatchObject({ answer: 'Жауап дұрыс', evidence: 'Дәлел дұрыс', tip: null });
+    expect(feedbackParts('kk', checkAnswer(find, 'a', ['s3']), find)).toMatchObject({ answer: 'Жауап қате', evidence: 'Үзінді жауапты дәлелдемейді' });
+    expect(feedbackParts('kk', checkAnswer(find, 'b', ['s1']), find)).toMatchObject({ answer: 'Жауап дұрыс', evidence: 'Дәлел дұрыс', tip: null });
+  });
+});
+
+describe('недостающее доказательство: отзыв зависит от типа задания', () => {
+  it('сопоставление — «найди вторую деталь», вывод — про опору для вывода (ru)', () => {
+    expect(feedbackText('ru', checkAnswer(match, 'c', ['s5']), match)).toBe('Ответ верный. Найди вторую деталь — ещё одно предложение, с которым нужно сопоставить.');
+    expect(feedbackText('ru', checkAnswer(infer, 'b', ['s6']), 'infer')).toMatch(/^Ответ верный\. Для вывода нужна ещё одна опора/);
+    expect(feedbackParts('ru', checkAnswer(match, 'c', ['s5']), match).tip).toBe('Найди вторую деталь — ещё одно предложение, с которым нужно сопоставить.');
+    expect(feedbackParts('ru', checkAnswer(infer, 'b', ['s6']), infer).tip).not.toMatch(/сопостав/);
+  });
+  it('казахский урок учителя (docs/pitch): t2, ответ a и только s3 → «екінші деректі тап»; + s4 → засчитано', () => {
+    const kk = LessonSchema.parse(pitchKk);
+    const t2 = kk.tasks[1]!;
+    expect(t2.skill).toBe('match');
+    const first = checkAnswer(t2, 'a', ['s3']);
+    expect(first).toEqual({ answerCorrect: true, evidence: 'missing', solved: false });
+    expect(feedbackText('kk', first, t2)).toBe('Жауап дұрыс. Екінші деректі тап — салыстыруға керек тағы бір сөйлем.');
+    expect(feedbackParts('kk', first, t2)).toMatchObject({ answer: 'Жауап дұрыс', tip: 'Екінші деректі тап — салыстыруға керек тағы бір сөйлем.' });
+    expect(checkAnswer(t2, 'a', ['s3', 's4']).solved).toBe(true);
+    expect(feedbackText('kk', checkAnswer(kk.tasks[2]!, 'b', ['s6']), kk.tasks[2]!)).toMatch(/Қорытындыға тағы бір тірек керек/);
   });
 });

@@ -182,6 +182,7 @@ export function Teacher() {
 
       <section id="t-step-2" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-2-title" data-testid={draft ? 't-draft' : undefined}>
         <StepTitle n={2} id="t-step-2-title">{t('tDraftTitle')}</StepTitle>
+        <p className="rounded-xl border-l-4 border-brand bg-brand-soft/60 p-3 text-sm" data-testid="t-autocheck">{t('tAutoCheck')}</p>
         {!draft ? <p className="text-sm text-muted">{t('tStep2Empty')}</p> : (
           <>
             {liveServerErrors.length > 0 && <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert"><b>{t('tRefErrors')}</b><ul className="list-disc pl-5">{liveServerErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}

@@ -128,31 +128,50 @@ export function checkAnswer(task: Task, optionId: string | null, evidence: strin
   return { answerCorrect, evidence: verdict, solved: answerCorrect && verdict === 'correct' };
 }
 
-const FEEDBACK: Record<Language, Record<EvidenceVerdict | 'answerWrong' | 'solved', string>> = {
+/** Что сказать, когда доказательства не хватает, — зависит от типа задания. */
+const MISSING: Record<Language, Record<Skill, string>> = {
+  ru: {
+    find: 'Отметь все предложения, в которых об этом сказано.',
+    match: 'Найди вторую деталь — ещё одно предложение, с которым нужно сопоставить.',
+    infer: 'Для вывода нужна ещё одна опора — найди предложение, из которого вместе с отмеченным следует ответ.',
+  },
+  kk: {
+    find: 'Бұл туралы айтылған барлық сөйлемді белгіле.',
+    match: 'Екінші деректі тап — салыстыруға керек тағы бір сөйлем.',
+    infer: 'Қорытындыға тағы бір тірек керек — белгіленгенмен бірге жауапқа әкелетін сөйлемді тап.',
+  },
+};
+
+const FEEDBACK: Record<Language, Record<Exclude<EvidenceVerdict, 'missing'> | 'answerWrong' | 'solved' | 'answerRight', string>> = {
   ru: {
     solved: 'Верно! И ответ, и доказательство найдены.',
     answerWrong: 'Ответ пока неверный. Перечитайте отмеченные предложения.',
+    answerRight: 'Ответ верный.',
     correct: 'Доказательство выбрано верно.',
     empty: 'Отметьте в тексте предложение, которое подтверждает ответ.',
-    missing: 'Ответ верный, но доказательства не хватает: найдите ещё одно предложение, которое нужно для вывода.',
     extra: 'Ответ верный, но отмечено лишнее. Оставьте только предложения, которые прямо подтверждают ответ.',
     wrong: 'Ответ верный, но выбранная цитата его не подтверждает. Уточните: в каком предложении об этом сказано?',
   },
   kk: {
     solved: 'Дұрыс! Жауап та, дәлел де табылды.',
     answerWrong: 'Жауап әзірге қате. Мәтінді қайта оқып көріңіз.',
+    answerRight: 'Жауап дұрыс.',
     correct: 'Дәлел дұрыс таңдалды.',
     empty: 'Жауапты дәлелдейтін сөйлемді мәтіннен белгілеңіз.',
-    missing: 'Жауап дұрыс, бірақ дәлел жеткіліксіз: қорытындыға қажет тағы бір сөйлемді табыңыз.',
     extra: 'Жауап дұрыс, бірақ артық сөйлем белгіленген. Жауапты тікелей дәлелдейтін сөйлемдерді ғана қалдырыңыз.',
     wrong: 'Жауап дұрыс, бірақ таңдалған үзінді оны дәлелдемейді. Нақтылаңыз: бұл туралы қай сөйлемде айтылған?',
   },
 };
 
-export function feedbackText(lang: Language, r: CheckResult): string {
+type SkillRef = Skill | Pick<Task, 'skill'>;
+const skillOf = (s: SkillRef): Skill => (typeof s === 'string' ? s : s.skill);
+
+/** Одна строка обратной связи. Подсказка о недостающем доказательстве зависит от типа задания (task или skill). */
+export function feedbackText(lang: Language, r: CheckResult, task: SkillRef): string {
   const f = FEEDBACK[lang];
   if (r.solved) return f.solved;
   if (!r.answerCorrect) return f.answerWrong;
+  if (r.evidence === 'missing') return `${f.answerRight} ${MISSING[lang][skillOf(task)]}`;
   return f[r.evidence];
 }
 
@@ -162,7 +181,7 @@ export interface FeedbackParts { answer: string; evidence: string; tip: string |
 const PARTS: Record<Language, {
   answer: Record<'yes' | 'no', string>;
   evidence: Record<EvidenceVerdict, string>;
-  tip: Record<EvidenceVerdict | 'answerWrong', string>;
+  tip: Record<Exclude<EvidenceVerdict, 'missing'> | 'answerWrong', string>;
 }> = {
   ru: {
     answer: { yes: 'Ответ верный', no: 'Ответ неверный' },
@@ -176,7 +195,6 @@ const PARTS: Record<Language, {
     tip: {
       answerWrong: 'Перечитай текст и выбери другой ответ. Отмеченные предложения сохранятся.',
       correct: '',
-      missing: 'Найди ещё одно предложение, без которого вывод не сделать.',
       extra: 'Сними выделение с предложения, которое не подтверждает ответ напрямую.',
       wrong: 'В каком предложении об этом сказано? Сними отметку и выбери другое.',
       empty: 'Нажми в тексте на предложение, которое подтверждает ответ.',
@@ -194,7 +212,6 @@ const PARTS: Record<Language, {
     tip: {
       answerWrong: 'Мәтінді қайта оқып, басқа жауапты таңда. Белгіленген сөйлемдер сақталады.',
       correct: '',
-      missing: 'Қорытынды жасауға қажет тағы бір сөйлемді тап.',
       extra: 'Жауапты тікелей дәлелдемейтін сөйлемнің белгісін алып таста.',
       wrong: 'Бұл туралы қай сөйлемде айтылған? Белгіні алып, басқасын таңда.',
       empty: 'Мәтіннен жауапты дәлелдейтін сөйлемді бас.',
@@ -202,12 +219,12 @@ const PARTS: Record<Language, {
   },
 };
 
-export function feedbackParts(lang: Language, r: CheckResult): FeedbackParts {
+export function feedbackParts(lang: Language, r: CheckResult, task: SkillRef): FeedbackParts {
   const p = PARTS[lang];
-  const tip = !r.answerCorrect ? p.tip.answerWrong : r.evidence === 'correct' ? null : p.tip[r.evidence];
+  const evTip = r.evidence === 'correct' ? '' : r.evidence === 'missing' ? MISSING[lang][skillOf(task)] : p.tip[r.evidence];
   // Если неверны и ответ, и цитата — сначала про ответ, затем подсказка про цитату.
-  const both = !r.answerCorrect && r.evidence !== 'correct' ? `${p.tip.answerWrong} ${p.tip[r.evidence]}` : tip;
-  return { answer: r.answerCorrect ? p.answer.yes : p.answer.no, evidence: p.evidence[r.evidence], tip: both || null };
+  const tip = [r.answerCorrect ? '' : p.tip.answerWrong, evTip].filter(Boolean).join(' ');
+  return { answer: r.answerCorrect ? p.answer.yes : p.answer.no, evidence: p.evidence[r.evidence], tip: tip || null };
 }
 
 // ---------- Рекомендация ----------
