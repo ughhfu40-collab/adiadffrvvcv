@@ -64,6 +64,14 @@ test('e2e работает только с поддельной моделью, 
   expect(health.timeoutSec).toBe(5);
 });
 
+test('автоматическое название совпадает с языком урока в обоих режимах', async ({ page }) => {
+  await page.getByTestId('t-lang').selectOption('kk');
+  await generate(page, 'Бірінші сөйлем осында. Екінші сөйлем осында. Үшінші сөйлем осында.');
+  expect((await exportJson(page)).title).toBe('Жаңа сабақ');
+  await page.getByRole('button', { name: 'Составить вручную' }).click();
+  await expect(page.getByTestId('t-draft').getByRole('textbox', { name: 'Название урока', exact: true })).toHaveValue('Жаңа сабақ');
+});
+
 test('текст, название и язык сохраняются до создания черновика', async ({ page, context }) => {
   const text = 'В первой строке цель урока.\nВо второй — расписание.';
   await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });

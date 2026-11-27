@@ -41,17 +41,21 @@ export async function seedBuiltins(d: AppDB = db) {
 }
 
 export interface SkillStats { attempts: number; solved: number; errors: number }
-export async function skillProgress(d: AppDB = db): Promise<Record<Skill, SkillStats>> {
-  const out: Record<Skill, SkillStats> = { find: { attempts: 0, solved: 0, errors: 0 }, match: { attempts: 0, solved: 0, errors: 0 }, infer: { attempts: 0, solved: 0, errors: 0 } };
-  const solvedTasks = new Set<string>();
+export async function readProgress(d: AppDB = db) {
+  const skills: Record<Skill, SkillStats> = { find: { attempts: 0, solved: 0, errors: 0 }, match: { attempts: 0, solved: 0, errors: 0 }, infer: { attempts: 0, solved: 0, errors: 0 } };
+  const solved = new Set<string>();
+  const solvedBySkill: Record<Skill, Set<string>> = { find: new Set(), match: new Set(), infer: new Set() };
   for (const a of await d.attempts.toArray()) {
-    const s = out[a.skill];
-    s.attempts++;
-    if (a.solved) solvedTasks.add(`${a.skill}|${a.lessonId}/${a.taskId}`);
-    else s.errors++;
+    const stats = skills[a.skill];
+    stats.attempts++;
+    if (a.solved) {
+      const key = `${a.lessonId}/${a.taskId}`;
+      solved.add(key);
+      solvedBySkill[a.skill].add(key);
+    } else stats.errors++;
   }
-  for (const k of solvedTasks) out[k.split('|')[0] as Skill].solved++;
-  return out;
+  for (const skill of ['find', 'match', 'infer'] as const) skills[skill].solved = solvedBySkill[skill].size;
+  return { skills, solved };
 }
 
 export async function solvedKeys(d: AppDB = db): Promise<Set<string>> {

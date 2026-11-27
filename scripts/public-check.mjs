@@ -2,7 +2,7 @@
 // → t2 (только s3: «ответ верный» + «найди вторую деталь», затем + s4 без повторного выбора ответа) → перезагрузка → прогресс 2 из 3;
 // переключение языка + перезагрузка (язык сохраняется); горизонтальная прокрутка. Профили: ноутбук 1440 и телефон 390×844 (касания).
 // При падении сохраняет trace. Запуск: node scripts/public-check.mjs [url] [lesson.json]
-import { chromium, devices } from '@playwright/test';
+import { chromium, devices, expect } from '@playwright/test';
 import { readFileSync, mkdirSync } from 'node:fs';
 const URL_ = process.argv[2] ?? 'https://ughhfu40-collab.github.io/adiadffrvvcv/';
 const FILE = process.argv[3] ?? 'docs/pitch/lesson-kk-after-teacher.json';
@@ -25,6 +25,7 @@ for (const [name, dev] of [['laptop', { ...devices['Desktop Chrome'], viewport: 
   try {
     await p.goto(URL_);
     r.build = await p.getByTestId('build').innerText();
+    await expect(p.getByTestId('start-lesson')).toBeEnabled();
     r.homeNoHScroll = await noHScroll();
     ok('startButtonInViewport', await p.getByTestId('start-lesson').evaluate((el) => { const b = el.getBoundingClientRect(); return b.top >= 0 && b.bottom <= window.innerHeight; }));
     step = 'импорт JSON';
@@ -40,7 +41,8 @@ for (const [name, dev] of [['laptop', { ...devices['Desktop Chrome'], viewport: 
     step = 'отключить сеть и перезагрузить';
     await ctx.setOffline(true);
     await p.reload();
-    await p.getByTestId(`lesson-${lesson.id}`).waitFor();
+    const card = p.getByTestId(`lesson-${lesson.id}`);
+    await card.waitFor();
     ok('networkBlocked', await offlineProbe());
     if (!r.steps.networkBlocked) throw new Error('сеть не отключилась');
     ok('lessonAfterOfflineReload');
@@ -77,8 +79,8 @@ for (const [name, dev] of [['laptop', { ...devices['Desktop Chrome'], viewport: 
     await p.reload();
     await p.getByTestId(`lesson-${lesson.id}`).waitFor();
     ok('stillOffline', await offlineProbe());
-    r.progress = (await p.getByTestId(`lesson-${lesson.id}`).innerText()).match(/Выполнено \d+ из \d+/)?.[0];
-    if (r.progress !== 'Выполнено 2 из 3') throw new Error(`прогресс: ${r.progress}`);
+    await expect(card).toContainText('Выполнено 2 из 3');
+    r.progress = 'Выполнено 2 из 3';
     ok('progressAfterReload');
     step = 'язык интерфейса';
     await p.getByTestId('ui-lang').click();
@@ -86,7 +88,8 @@ for (const [name, dev] of [['laptop', { ...devices['Desktop Chrome'], viewport: 
     await p.reload();
     await p.getByText('Дағдылар бойынша прогресс').waitFor();
     ok('kkPersistedAfterReload');
-    r.kkCard = (await p.getByTestId(`lesson-${lesson.id}`).innerText()).split('\n').pop();
+    await expect(card).toContainText('2-і орындалды');
+    r.kkCard = (await card.innerText()).split('\n').pop();
     ok('kkUi', r.kkCard?.includes('2-і орындалды') ?? false);
     r.homeNoHScrollKk = await noHScroll();
     await p.screenshot({ path: `${OUT}/${name}-home-kk.png`, fullPage: true });
@@ -96,6 +99,9 @@ for (const [name, dev] of [['laptop', { ...devices['Desktop Chrome'], viewport: 
     await p.getByText('Прогресс по навыкам').waitFor();
     ok('ruUiBack');
     r.homeNoHScrollRu = await noHScroll();
+    step = 'итоги приёмочных проверок';
+    expect(Object.values(r.steps)).toEqual(Object.keys(r.steps).map(() => true));
+    expect([r.homeNoHScroll, r.lessonNoHScroll, r.homeNoHScrollKk, r.homeNoHScrollRu]).toEqual([true, true, true, true]);
     await ctx.tracing.stop();
   } catch (e) {
     failed = true;

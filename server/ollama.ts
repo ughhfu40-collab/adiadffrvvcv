@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
+import { DEFAULT_LESSON_TITLE, qualityIssues, qualityIssueText, type QualityIssue, TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
 
 export const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'gemma3:12b';
@@ -171,5 +171,5 @@ export async function generateLesson(input: { text: string; language: Language; 
   }
   // Время + случайный суффикс: параллельные запросы в одну миллисекунду получают разные ID.
   const slug = `gen-${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  return assembleDraft(raw, { id: slug, title: input.title || 'Новый урок', language: input.language }, sentences);
+  return assembleDraft(raw, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language }, sentences);
 }

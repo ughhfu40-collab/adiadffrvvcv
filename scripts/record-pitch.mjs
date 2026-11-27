@@ -2,11 +2,14 @@
 // → импорт в публичное демо ученика → решение задания. Кадры снимаются через CDP-screencast,
 // ожидание генерации ускоряется (с пометкой на экране), видео кодируется ffmpeg из Playwright.
 // Запуск: npm run server; npm run build && npm run preview; node scripts/record-pitch.mjs
-import { chromium } from '@playwright/test';
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { chromium, expect } from '@playwright/test';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const LOCAL = process.env.LOCAL_URL ?? 'http://127.0.0.1:4173/';
 const DEMO = process.env.DEMO_URL ?? 'https://ughhfu40-collab.github.io/adiadffrvvcv/';
@@ -51,6 +54,12 @@ function saveSegment(name) {
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const cap = async (page, text, ms = 2200) => { await page.evaluate((t) => window.__cap(t), text); await pause(ms); };
 async function slowFill(loc, text) { await loc.click(); await loc.fill(''); await loc.pressSequentially(text, { delay: 8 }); }
+async function fillEvidence(page, index, value) {
+  const field = page.getByTestId(`t-evidence-${index}`);
+  const summary = page.getByTestId(`t-ev-${index}`).locator('summary');
+  if (!(await field.isVisible()) && (await summary.count())) await summary.click();
+  await slowFill(field, value);
+}
 
 // ---------- Учитель (локально) ----------
 const STUDENT_ONLY = process.env.STUDENT_ONLY === '1';
@@ -93,9 +102,9 @@ await t.getByTestId('t-draft').scrollIntoViewIfNeeded();
 await cap(t, `Черновик готов: ${Math.floor(genSecs / 60)} мин ${genSecs % 60} с реального времени. Формат и ID проверены сервером автоматически`, 3200);
 
 // Показываем исходный t2 модели как есть, ждём решения проверяющего (файл verdict.json).
-const fs2 = t.getByTestId('t-draft').locator('fieldset').nth(1);
+const fs2 = t.getByTestId('t-task-1');
 await fs2.scrollIntoViewIfNeeded();
-await t.evaluate(() => { const f = document.querySelectorAll('[data-testid="t-draft"] fieldset')[1]; f.style.outline = '4px solid #f59e0b'; f.style.outlineOffset = '4px'; });
+await fs2.evaluate(f => { f.style.outline = '4px solid #f59e0b'; f.style.outlineOffset = '4px'; });
 await cap(t, 'Задание t2 — ровно так, как его сгенерировала модель. Учитель сверяет его с текстом', 3500);
 const verdictFile = join(OUT, 'verdict.json');
 rmSync(verdictFile, { force: true });
@@ -110,26 +119,27 @@ await cap(t, verdict.t2.problem, 4500);
 if (verdict.t2.edits) {
   const e = verdict.t2.edits;
   if (e.question) await slowFill(fs2.getByPlaceholder('Вопрос'), e.question);
-  const rows = fs2.locator('div.flex.items-center.gap-2');
-  for (let k = 0; k < (e.options ?? []).length; k++) await slowFill(rows.nth(k).locator('input.input'), e.options[k]);
-  if (e.correctIndex !== undefined) await rows.nth(e.correctIndex).locator('input[type=radio]').check();
-  if (e.evidence) await slowFill(t.getByTestId('t-evidence-1'), e.evidence);
+  const options = fs2.getByRole('textbox', { name: /^Вариант / });
+  for (let k = 0; k < (e.options ?? []).length; k++) await slowFill(options.nth(k), e.options[k]);
+  if (e.correctIndex !== undefined) await fs2.getByRole('radio').nth(e.correctIndex).check();
+  if (e.evidence) await fillEvidence(t, 1, e.evidence);
   if (e.hint) await slowFill(fs2.getByPlaceholder('Подсказка'), e.hint);
   await cap(t, verdict.t2.after ?? 't2 исправлено учителем', 3000);
 }
-await t.evaluate(() => { document.querySelectorAll('[data-testid="t-draft"] fieldset')[1].style.outline = ''; });
+await fs2.evaluate(f => { f.style.outline = ''; });
 for (const [idx, key] of [[0, 't1'], [2, 't3']]) {
   const v = verdict[key]; if (!v?.edits) continue;
-  const fs = t.getByTestId('t-draft').locator('fieldset').nth(idx);
+  const fs = t.getByTestId(`t-task-${idx}`);
   await fs.scrollIntoViewIfNeeded();
   await cap(t, v.problem, 3000);
-  if (v.edits.evidence) await slowFill(t.getByTestId(`t-evidence-${idx}`), v.edits.evidence);
+  if (v.edits.evidence) await fillEvidence(t, idx, v.edits.evidence);
   if (v.edits.hint) await slowFill(fs.getByPlaceholder('Подсказка'), v.edits.hint);
   if (v.edits.question) await slowFill(fs.getByPlaceholder('Вопрос'), v.edits.question);
 }
 await t.getByRole('button', { name: 'Сохранить урок' }).scrollIntoViewIfNeeded();
 await cap(t, 'Валидация пройдена → сохраняем и экспортируем JSON', 1500);
 await t.getByRole('button', { name: 'Сохранить урок' }).click();
+await t.getByTestId('t-saved').waitFor();
 const dl = t.waitForEvent('download');
 await t.getByTestId('t-export').click();
 await (await dl).saveAs(file);
@@ -154,7 +164,8 @@ try {
   await s.getByTestId('offline-status').and(s.locator('[data-ready="true"]')).waitFor({ timeout: 60_000 });
   await cap(s, 'Публичное демо ученика на GitHub Pages: «Готово к офлайну»', 2500);
   step = 'импорт JSON (онлайн)';
-  await s.getByTestId('import-file').scrollIntoViewIfNeeded();
+  const openImport = s.getByTestId('import-open');
+  if (await openImport.count()) await openImport.click();
   await cap(s, 'Импортируем JSON, который экспортировал учитель, — та же схема проверки', 1800);
   await s.getByTestId('import-file').setInputFiles(file);
   await s.getByTestId('import-ok').waitFor();
@@ -163,7 +174,8 @@ try {
   step = 'отключение сети и перезагрузка';
   await ctx.setOffline(true);
   await s.reload();
-  await s.getByTestId(`lesson-${lesson.id}`).waitFor();
+  const lessonCard = s.getByTestId(`lesson-${lesson.id}`);
+  await lessonCard.waitFor();
   // Доказательство отключения: запрос мимо кеша должен упасть.
   checks.networkBlocked = await s.evaluate(() => fetch(`${location.origin}/__probe?${Date.now()}`, { cache: 'no-store' }).then(() => false, () => true));
   if (!checks.networkBlocked) throw new Error('сеть не отключилась');
@@ -198,10 +210,9 @@ try {
   await s.reload();
   await s.getByTestId(`lesson-${lesson.id}`).waitFor();
   checks.stillOffline = await s.evaluate(() => fetch(`${location.origin}/__probe?${Date.now()}`, { cache: 'no-store' }).then(() => false, () => true));
-  const card = await s.getByTestId(`lesson-${lesson.id}`).innerText();
-  checks.lessonProgressAfterReload = card.match(/Выполнено \d+ из \d+/)?.[0];
+  await expect(lessonCard).toContainText('Выполнено 2 из 3');
+  checks.lessonProgressAfterReload = 'Выполнено 2 из 3';
   checks.matchSkillAfterReload = (await s.getByTestId('progress-match').innerText()).replace(/\n/g, ' ');
-  if (checks.lessonProgressAfterReload !== 'Выполнено 2 из 3') throw new Error(`прогресс после перезагрузки: ${checks.lessonProgressAfterReload}`);
   await s.getByTestId('progress').scrollIntoViewIfNeeded();
   await cap(s, 'Ещё одна перезагрузка без сети — прогресс сохранён: 2 из 3', 3000);
   await cap(s, 'Oqy: читать и понимать — офлайн, на казахском и русском', 2500);
@@ -217,7 +228,11 @@ saveSegment('student');
 await b.close();
 
 // ---------- Сборка видео: сегменты учителя и ученика по порядку ----------
-const ff = join(homedir(), 'Library/Caches/ms-playwright', readdirSync(join(homedir(), 'Library/Caches/ms-playwright')).find((d) => d.startsWith('ffmpeg')), 'ffmpeg-mac');
+const macCache = join(homedir(), 'Library/Caches/ms-playwright');
+const bundled = process.platform === 'darwin' && existsSync(macCache)
+  ? readdirSync(macCache).find((name) => name.startsWith('ffmpeg') && existsSync(join(macCache, name, 'ffmpeg-mac')))
+  : undefined;
+const ff = process.env.FFMPEG ?? (bundled ? join(macCache, bundled, 'ffmpeg-mac') : 'ffmpeg');
 let vt = 0; const timeline = [];
 for (const name of ['teacher', 'student']) {
   const dir = join(OUT, `seg-${name}`);
@@ -229,13 +244,16 @@ for (const name of ['teacher', 'student']) {
   vt += 300;
 }
 const total = vt + 500;
+if (!timeline.length) throw new Error('Нет кадров для записи видео.');
 const proc = spawn(ff, ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-c:v', 'mjpeg', '-framerate', String(FPS), '-i', 'pipe:0',
   '-vf', `scale=${W}:${H}`, '-c:v', 'libvpx-vp9', '-b:v', '1500k', '-deadline', 'good', '-cpu-used', '4', '-pix_fmt', 'yuv420p', join(OUT, 'pitch.webm')], { stdio: ['pipe', 'inherit', 'inherit'] });
-let j = 0;
-for (let ms = 0; ms < total; ms += 1000 / FPS) {
-  while (j + 1 < timeline.length && timeline[j + 1].vt <= ms) j++;
-  if (!proc.stdin.write(timeline[j].buf)) await new Promise((r) => proc.stdin.once('drain', r));
+function* timedFrames() {
+  let index = 0;
+  for (let ms = 0; ms < total; ms += 1000 / FPS) {
+    while (index + 1 < timeline.length && timeline[index + 1].vt <= ms) index++;
+    yield timeline[index].buf;
+  }
 }
-proc.stdin.end();
-await new Promise((r) => proc.on('close', r));
+const [, [encodeStatus]] = await Promise.all([pipeline(Readable.from(timedFrames()), proc.stdin), once(proc, 'close')]);
+if (encodeStatus !== 0) throw new Error(`FFmpeg завершился с кодом ${encodeStatus}.`);
 console.log(JSON.stringify({ checks, genSecs, reviewSecs, frames: frames.length, videoSeconds: Math.round(total / 1000), out: join(OUT, 'pitch.webm'), lesson: file }));

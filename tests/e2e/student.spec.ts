@@ -350,6 +350,67 @@ async function holdAttemptsStore(page: Page, ms: number) {
   }), ms);
 }
 
+test('каталог при медленном чтении показывает загрузку, затем сохранённый прогресс', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'b', ['s1']);
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.getAll;
+    const setSuccess = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
+    const gate = new Promise<void>(resolve => window.addEventListener('test-release-progress', () => resolve(), { once: true }));
+    IDBObjectStore.prototype.getAll = function (...args: Parameters<typeof original>) {
+      const request = original.apply(this, args);
+      if (this.name === 'attempts') {
+        Object.defineProperty(request, 'onsuccess', {
+          set(handler: ((event: Event) => void) | null) {
+            if (!handler) { setSuccess.call(request, null); return; }
+            setSuccess.call(request, (event: Event) => { void gate.then(() => handler.call(request, event)); });
+          },
+        });
+      }
+      return request;
+    };
+  });
+  await context.setOffline(true);
+  await page.reload();
+  const card = page.getByTestId('lesson-ru-saiga');
+  await expect(card).toContainText('Загрузка…', { timeout: 3500 });
+  await expect(card).not.toContainText('Выполнено 0 из 3');
+  await expect(page.getByTestId('start-lesson')).toBeDisabled();
+  await page.evaluate(() => { window.dispatchEvent(new Event('test-release-progress')); });
+  await expect(card).toContainText('Выполнено 1 из 3');
+  await expect(page.getByTestId('progress-find')).toContainText('1 решено');
+  await expect(page.getByTestId('start-lesson')).toBeEnabled();
+});
+
+test('при медленной рекомендации экран результата не пишет, что ошибок не было', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'a', ['s1']);
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'false');
+  await page.getByTestId('opt-b').check();
+  await page.getByTestId('check').click();
+  await page.getByTestId('next').click();
+  await answer(page, 'c', ['s4', 's5']);
+  await page.getByTestId('next').click();
+  await answer(page, 'b', ['s6', 's7']);
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  const blocker = await context.newPage();
+  await blocker.goto('/');
+  await holdAttemptsStore(blocker, 6000);
+  try {
+    await page.getByTestId('next').click();
+    await expect(page.getByTestId('recommendation-loading')).toBeVisible({ timeout: 2500 });
+    await expect(page.getByTestId('no-recommendation')).toHaveCount(0);
+    await blocker.evaluate(() => (window as unknown as { __released: Promise<void> }).__released);
+    await expect(page.getByTestId('recommendation')).toContainText('Найти факт');
+  } finally {
+    await blocker.close();
+  }
+});
+
 test('медленная запись в IndexedDB: «Засчитано» только после записи, двойное нажатие = одна попытка, прогресс переживает офлайн-перезагрузку', async ({ context }) => {
   const a = await context.newPage();
   await a.goto('/');

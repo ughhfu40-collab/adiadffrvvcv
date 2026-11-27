@@ -2,12 +2,13 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useLiveQuery } from 'dexie-react-hooks';
 import { checkAnswer, feedbackParts, parseLessonJson, recommendNext, SKILL_LABELS, type CheckResult, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
-import { db, importLesson, skillProgress, solvedKeys } from './db';
+import { db, importLesson, readProgress, solvedKeys } from './db';
 import { PITCH_URL, useI18n } from './i18n';
 
 type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 
 const LANG_NAME: Record<Language, string> = { kk: 'Қазақша', ru: 'Русский' };
+const EMPTY_SOLVED = new Set<string>();
 const firstUnsolved = (l: Lesson, solved: Set<string>) => l.tasks.findIndex((x) => !solved.has(`${l.id}/${x.id}`));
 
 /** «Начать урок»: задание 1 первого незавершённого урока на языке интерфейса; если все завершены — первого урока. */
@@ -18,18 +19,19 @@ export function pickStart(lessons: Lesson[], lang: Language, solved: Set<string>
 
 export function Student() {
   const { t, lang } = useI18n();
-  const rows = useLiveQuery(() => db.lessons.toArray(), []) ?? [];
-  const progress = useLiveQuery(() => skillProgress(), []);
-  const solved = useLiveQuery(() => solvedKeys(), []) ?? new Set<string>();
+  const rows = useLiveQuery(() => db.lessons.toArray(), []);
+  const all = useMemo(() => rows?.map((row) => row.lesson) ?? [], [rows]);
+  const progress = useLiveQuery(() => readProgress().catch(() => null), []);
+  const solved = progress?.solved ?? EMPTY_SOLVED;
   const [play, setPlay] = useState<Play | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const importId = useId();
 
-  if (play) return <Player key={play.lesson.id + play.taskIds.join() + (play.startIdx ?? 0)} play={play} all={rows.map((r) => r.lesson)} onExit={() => setPlay(null)} onPlay={setPlay} />;
+  if (play) return <Player key={play.lesson.id + play.taskIds.join() + (play.startIdx ?? 0)} play={play} all={all} onExit={() => setPlay(null)} onPlay={setPlay} />;
 
   // Уроки на языке интерфейса — первыми (порядок внутри группы сохраняется).
-  const ordered = [...rows].sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang));
-  const start = pickStart(ordered.map((r) => r.lesson), lang, solved);
+  const ordered = [...(rows ?? [])].sort((a, b) => Number(b.lesson.language === lang) - Number(a.lesson.language === lang));
+  const start = progress === undefined ? null : pickStart(all, lang, solved);
   const startPlay = () => start && setPlay({ lesson: start, taskIds: start.tasks.map((x) => x.id) });
 
   return (
@@ -70,7 +72,7 @@ export function Student() {
         <ul className="mt-5 grid gap-4 sm:grid-cols-2">
           {ordered.map(({ lesson, source }) => {
             const done = lesson.tasks.filter((x) => solved.has(`${lesson.id}/${x.id}`)).length;
-            const complete = done === lesson.tasks.length;
+            const complete = !!progress && done === lesson.tasks.length;
             return (
               <li key={lesson.id}>
                 <button type="button" className="card group flex h-full w-full flex-col text-left transition hover:border-brand/60 hover:shadow-md active:translate-y-px"
@@ -87,7 +89,7 @@ export function Student() {
                     <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
                       {lesson.tasks.map((x) => <span key={x.id} className={`h-1.5 w-6 rounded-full ${solved.has(`${lesson.id}/${x.id}`) ? 'bg-brand' : 'bg-line'}`} />)}
                     </span>
-                    <span className="text-sm text-muted">{t('doneOf', { d: done, n: lesson.tasks.length })}</span>
+                    <span className="text-sm text-muted">{progress ? t('doneOf', { d: done, n: lesson.tasks.length }) : t(progress === undefined ? 'loading' : 'progressUnavailable')}</span>
                   </span>
                 </button>
               </li>
@@ -101,15 +103,17 @@ export function Student() {
           <h2 id="progress-title" className="font-serif text-3xl font-semibold tracking-tight">{t('progressTitle')}</h2>
           <p className="mt-1 text-sm text-muted">{t('progressLead')}</p>
         </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-3" data-testid="progress">
+        {!progress ? (
+          <p className="mt-5 text-sm text-muted" role="status" data-testid="progress">{t(progress === undefined ? 'loading' : 'progressUnavailable')}</p>
+        ) : <div className="mt-5 grid gap-4 sm:grid-cols-3" data-testid="progress">
           {(['find', 'match', 'infer'] as Skill[]).map((s, i) => (
             <div key={s} className="card" data-testid={`progress-${s}`}>
               <div className="text-sm font-medium text-muted"><span className="mr-2 font-serif text-brand-ink">{i + 1}</span>{SKILL_LABELS[lang][s]}</div>
-              <div className="mt-2 font-serif text-4xl font-semibold">{progress?.[s].solved ?? 0}<span className="font-sans text-base font-normal text-muted"> {t('solved')}</span></div>
-              <div className="mt-1 text-xs text-muted">{t('errorsAttempts', { e: progress?.[s].errors ?? 0, a: progress?.[s].attempts ?? 0 })}</div>
+              <div className="mt-2 font-serif text-4xl font-semibold">{progress.skills[s].solved}<span className="font-sans text-base font-normal text-muted"> {t('solved')}</span></div>
+              <div className="mt-1 text-xs text-muted">{t('errorsAttempts', { e: progress.skills[s].errors, a: progress.skills[s].attempts })}</div>
             </div>
           ))}
-        </div>
+        </div>}
       </section>
     </div>
   );
@@ -215,7 +219,8 @@ const PLAYER_TEXT = {
     needBoth: 'Чтобы проверить, выбери ответ и отметь хотя бы одно предложение.',
     saving: 'Сохраняю…', saveError: 'Не удалось сохранить попытку. Ответ и цитаты остались выбраны. Попробуй ещё раз.',
     done: 'Урок пройден!', more: 'Ещё одно задание', back: 'К урокам', task: 'Задание {n} из {total}',
-    weak: 'Навык с ошибками:', noRec: 'Без ошибок — дополнительное задание не нужно.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
+    weak: 'Навык с ошибками:', noRec: 'Дополнительное задание не требуется.', recLoading: 'Подбираю дополнительное задание…',
+    recError: 'Не удалось загрузить рекомендацию.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
   },
   kk: {
     check: 'Тексеру', recheck: 'Қайта тексеру', next: 'Келесі тапсырма', finish: 'Сабақты аяқтау', hint: 'Кеңес',
@@ -225,7 +230,8 @@ const PLAYER_TEXT = {
     needBoth: 'Тексеру үшін жауапты таңдап, кемінде бір сөйлемді белгіле.',
     saving: 'Сақталуда…', saveError: 'Тапсырма нәтижесі сақталмады. Жауап пен дәлелдер белгіленіп тұр. Қайта тексеріп көр.',
     done: 'Сабақ аяқталды!', more: 'Тағы бір тапсырма', back: 'Сабақтарға', task: '{total} тапсырманың {n}-сі',
-    weak: 'Қатесі бар дағды:', noRec: 'Қатесіз — қосымша тапсырма керек емес.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
+    weak: 'Қатесі бар дағды:', noRec: 'Қосымша тапсырма қажет емес.', recLoading: 'Қосымша тапсырма таңдалуда…',
+    recError: 'Ұсынысты жүктеу мүмкін болмады.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
   },
 } as const;
 
@@ -312,7 +318,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   const writingAttempt = useRef(false);
   const [showHint, setShowHint] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [rec, setRec] = useState<ReturnType<typeof recommendNext>>(null);
+  const [rec, setRec] = useState<ReturnType<typeof recommendNext> | 'unavailable'>();
   const textRef = useRef<HTMLElement>(null);
   const questionRef = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
@@ -323,10 +329,16 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
 
   useEffect(() => {
     if (!finished) return;
-    void (async () => {
+    let active = true;
+    setRec(undefined);
+    void db.transaction('r', db.attempts, async () => {
       const attempts = await db.attempts.where('lessonId').equals(lesson.id).toArray();
-      setRec(recommendNext(all, lesson, attempts, await solvedKeys()));
-    })();
+      return recommendNext(all, lesson, attempts, await solvedKeys());
+    }).then(
+      (next) => { if (active) setRec(next); },
+      () => { if (active) setRec('unavailable'); },
+    );
+    return () => { active = false; };
   }, [finished, all, lesson]);
 
   // Новое задание на телефоне: показываем вопрос с начала (текст ниже, к нему ведёт «К тексту»).
@@ -390,7 +402,11 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
           {finished ? (
             <div data-testid="finished" className="space-y-4">
               <p className="font-serif text-3xl font-semibold">{t.done}</p>
-              {rec ? (
+              {rec === undefined ? (
+                <p className="text-sm text-muted" role="status" data-testid="recommendation-loading">{t.recLoading}</p>
+              ) : rec === 'unavailable' ? (
+                <p className="text-sm text-muted" role="status">{t.recError}</p>
+              ) : rec ? (
                 <div className="rounded-xl border border-line bg-paper p-4" data-testid="recommendation">
                   <p className="text-sm">{t.weak} <b>{SKILL_LABELS[lang][rec.skill]}</b></p>
                   <p className="mt-1 text-sm text-muted">«{rec.task.question}» — {rec.lesson.title}</p>

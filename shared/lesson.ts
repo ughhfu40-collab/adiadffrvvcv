@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const LanguageSchema = z.enum(['kk', 'ru']);
 export type Language = z.infer<typeof LanguageSchema>;
 
+export const DEFAULT_LESSON_TITLE: Record<Language, string> = { kk: 'Жаңа сабақ', ru: 'Новый урок' };
+
 export const SkillSchema = z.enum(['find', 'match', 'infer']);
 export type Skill = z.infer<typeof SkillSchema>;
 

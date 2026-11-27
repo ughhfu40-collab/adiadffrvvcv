@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import { AppDB, seedBuiltins, skillProgress } from '../../web/src/db';
+import { AppDB, readProgress, seedBuiltins } from '../../web/src/db';
 
 describe('сохранение прогресса в IndexedDB', () => {
   it('попытки переживают переоткрытие базы', async () => {
@@ -12,9 +12,10 @@ describe('сохранение прогресса в IndexedDB', () => {
     a.close();
     const b = new AppDB(name);
     expect(await b.lessons.count()).toBe(4);
-    const p = await skillProgress(b);
-    expect(p.find).toEqual({ attempts: 2, solved: 1, errors: 1 });
-    expect(p.infer.attempts).toBe(0);
+    const p = await readProgress(b);
+    expect(p.skills.find).toEqual({ attempts: 2, solved: 1, errors: 1 });
+    expect(p.skills.infer.attempts).toBe(0);
+    expect(p.solved).toEqual(new Set(['ru-saiga/t1']));
   });
 });
 
