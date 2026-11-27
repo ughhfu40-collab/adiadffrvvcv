@@ -225,3 +225,11 @@ describe('ошибки ввода — на русском, одно сообще
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('сообщения качества — на языке урока', () => {
+  it('kk-урок получает казахские сообщения', () => {
+    const r = assembleDraft({ tasks: goodTasks.tasks.slice(0, 1) }, { id: 'x', title: 'T', language: 'kk' }, sentences);
+    expect(r).toMatchObject({ kind: 'quality' });
+    if (!r.ok && r.kind === 'quality') expect(r.errors.join(' ')).toMatch(/түріндегі тапсырма жоқ/);
+  });
+});

@@ -191,3 +191,15 @@ describe('исправленный учителем t2 (s3 + s4) не помеч
     expect(qualityWarnings(l)).toEqual([]);
   });
 });
+
+describe('ошибки импорта JSON — по-русски, без технического английского', () => {
+  it('тип, диапазон, пустой список, язык, тип задания, формат ID, не объект', () => {
+    const L = structuredClone(BUILTIN_LESSONS[0]!) as unknown as Record<string, unknown>;
+    const bad = [{ ...L, grade: 'восьмой' }, { ...L, grade: 10 }, { ...L, tasks: [] }, { ...L, language: 'en' }, { ...L, id: 'мой урок' }, [1, 2], { ...L, tasks: undefined }];
+    for (const v of bad) {
+      const r = parseLessonJson(JSON.stringify(v));
+      expect(r.ok).toBe(false);
+      if (!r.ok) for (const e of r.errors) expect(e, e).not.toMatch(/Invalid|expected|received|Too (big|small)/);
+    }
+  });
+});

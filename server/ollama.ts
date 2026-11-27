@@ -132,7 +132,7 @@ export function assembleDraft(raw: unknown, meta: { id: string; title: string; l
   const full = LessonSchema.safeParse(candidate);
   if (!full.success) return { ok: false, kind: 'references', errors: formatIssues(full.error), draft: base.data };
   const issues = qualityIssues(full.data);
-  return issues.length ? { ok: false, kind: 'quality', issues, errors: issues.map((q) => qualityIssueText('ru', q)), draft: full.data } : { ok: true, lesson: full.data };
+  return issues.length ? { ok: false, kind: 'quality', issues, errors: issues.map((q) => qualityIssueText(meta.language, q)), draft: full.data } : { ok: true, lesson: full.data };
 }
 
 export async function generateLesson(input: { text: string; language: Language; title: string }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {

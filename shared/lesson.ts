@@ -1,5 +1,35 @@
 import { z } from 'zod';
 
+// Русские сообщения для всех ошибок схемы (импорт JSON, /api/validate, /api/generate).
+// Явные сообщения у конкретных полей важнее этой карты.
+const TYPE_RU: Record<string, string> = {
+  string: 'строка', number: 'число', int: 'целое число', boolean: 'да/нет', array: 'список', object: 'объект',
+  undefined: 'пусто', null: 'null', nan: 'не число',
+};
+z.config({
+  customError: (iss) => {
+    const got = (v: unknown) => (Array.isArray(v) ? 'список' : v === null ? 'null' : TYPE_RU[typeof v] ?? typeof v);
+    switch (iss.code) {
+      case 'invalid_type':
+        return iss.input === undefined ? 'Поле обязательно' : `Неверный тип: нужно ${TYPE_RU[iss.expected] ?? iss.expected}, получено ${got(iss.input)}`;
+      case 'too_small':
+        return iss.origin === 'array' ? `Слишком мало элементов: нужно не меньше ${iss.minimum}`
+          : iss.origin === 'string' ? `Слишком короткое значение: нужно не меньше ${iss.minimum} символов` : `Значение должно быть не меньше ${iss.minimum}`;
+      case 'too_big':
+        return iss.origin === 'array' ? `Слишком много элементов: не больше ${iss.maximum}`
+          : iss.origin === 'string' ? `Слишком длинное значение: не больше ${iss.maximum} символов` : `Значение должно быть не больше ${iss.maximum}`;
+      case 'invalid_value':
+        return `Недопустимое значение: возможно ${iss.values.map((v) => JSON.stringify(v)).join(', ')}`;
+      case 'invalid_format':
+        return 'Неверный формат значения';
+      case 'unrecognized_keys':
+        return `Лишние поля: ${iss.keys.join(', ')}`;
+      default:
+        return undefined;
+    }
+  },
+});
+
 export const LanguageSchema = z.enum(['kk', 'ru']);
 export type Language = z.infer<typeof LanguageSchema>;
 
