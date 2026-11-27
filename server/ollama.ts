@@ -13,6 +13,8 @@ export class GenerationCancelled extends Error {}
 export const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 600_000);
 
 const DraftSchema = z.object({ tasks: z.array(TaskSchema).min(1) });
+export const MathDraftTaskSchema = TaskSchema.required({ calc: true }).extend({ solution: z.string().trim().min(1) });
+const MathDraftSchema = DraftSchema.extend({ tasks: z.array(MathDraftTaskSchema).min(1) });
 const OllamaChatSchema = z.object({ message: z.object({ content: z.string().trim().min(1) }) });
 
 /** JSON Schema для structured outputs Ollama (format). */
@@ -194,7 +196,7 @@ export type GenerateResult =
 
 /** Собирает урок из ответа модели и проверяет общей схемой (ID предложений, ссылки на варианты). */
 export function assembleDraft(raw: unknown, meta: { id: string; title: string; language: Language; grade?: Grade; subject?: Subject }, sentences: { id: string; text: string }[]): GenerateResult {
-  const parsed = DraftSchema.safeParse(raw);
+  const parsed = (meta.subject === 'math' ? MathDraftSchema : DraftSchema).safeParse(raw);
   if (!parsed.success) {
     return { ok: false, kind: 'structure', errors: ['Модель вернула черновик неверной структуры', ...formatIssues(parsed.error)] };
   }

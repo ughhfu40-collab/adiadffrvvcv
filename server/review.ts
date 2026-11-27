@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { answerOverlap, LessonSchema, qualityIssues, qualityIssueText, TaskSchema, formatIssues, type Language, type Lesson, type Task } from '../shared/lesson';
 import { subjectOf } from '../shared/math';
-import { callModelJson, MATH_DRAFT_JSON_SCHEMA, TIMEOUT_MS } from './ollama';
+import { callModelJson, MathDraftTaskSchema, MATH_DRAFT_JSON_SCHEMA, TIMEOUT_MS } from './ollama';
 
 export interface TaskReview {
   taskId: string;
@@ -223,13 +223,11 @@ export async function repairTask(lesson: Lesson, taskId: string, problems: strin
   const math = subjectOf(lesson) === 'math';
   const r = await callModelJson(buildRepairPrompt(lesson, current, problems), math ? MATH_DRAFT_JSON_SCHEMA.properties.tasks.items : REPAIR_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
   if (!r.ok) return r;
-  const parsed = TaskSchema.safeParse(r.data);
-  if (!parsed.success) return { ok: false, kind: 'structure', errors: ['Исправление ИИ неверной структуры', ...formatIssues(parsed.error)] };
-  if (math && (!parsed.data.solution?.trim() || !parsed.data.calc)) {
-    return { ok: false, kind: 'structure', errors: [lesson.language === 'kk'
-      ? 'Түзетілген тапсырмада есептің түсіндірмесі мен тексеру формуласы болуы керек.'
-      : 'В исправленном задании должны быть объяснение расчёта и формула проверки.'] };
-  }
+  const parsed = (math ? MathDraftTaskSchema : TaskSchema).safeParse(r.data);
+  if (!parsed.success) return { ok: false, kind: 'structure', errors: [
+    lesson.language === 'kk' ? 'ЖИ құрылымы қате түзету қайтарды' : 'Исправление ИИ неверной структуры',
+    ...formatIssues(parsed.error),
+  ] };
   // id и тип задания — от учителя, не от модели.
   const task: Task = { ...parsed.data, id: current.id, skill: current.skill };
   const next = { ...lesson, tasks: lesson.tasks.map((t, i) => (i === index ? task : t)) };

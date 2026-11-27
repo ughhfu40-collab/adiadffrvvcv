@@ -20,6 +20,22 @@ describe('сервер: проверка черновика модели', () =>
   it('принимает корректный черновик', () => {
     expect(assembleDraft(goodTasks, meta, sentences).ok).toBe(true);
   });
+  it('при генерации математики каждый ответ модели должен содержать расчёт и формулу', async () => {
+    const { default: math } = await import('../../lessons/math-ru-7-trip.json');
+    const raw = { tasks: math.tasks };
+    const mathMeta = { ...meta, subject: 'math' as const };
+    expect(assembleDraft(raw, mathMeta, math.sentences).ok).toBe(true);
+
+    const missingCalc = structuredClone(raw);
+    Reflect.deleteProperty(missingCalc.tasks[1]!, 'calc');
+    const missingSolution = structuredClone(raw);
+    missingSolution.tasks[1]!.solution = '   ';
+    for (const draft of [missingCalc, missingSolution]) {
+      const result = assembleDraft(draft, mathMeta, math.sentences);
+      expect(result).toMatchObject({ ok: false, kind: 'structure' });
+      expect(result).not.toHaveProperty('draft');
+    }
+  });
   it('отклоняет несуществующие ID предложений и вариантов', () => {
     const bad = structuredClone(goodTasks);
     bad.tasks[0]!.evidenceSets = [['s9']];
