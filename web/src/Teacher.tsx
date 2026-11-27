@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
+import { qualityWarnings, qualityWarningText, MIN_SENTENCES, isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, type Health } from './api';
 import { db } from './db';
 import { useI18n } from './i18n';
@@ -195,6 +195,7 @@ export function Teacher() {
             <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);
+              const taskWarnings = validation?.ok ? qualityWarnings(validation.lesson).filter((w) => w.taskIndex === i) : [];
               const taskErrors = allErrors.filter((e) => taskOf(e) === i);
               const flagged = taskIssues.length > 0 || taskErrors.length > 0;
               return (
@@ -207,6 +208,11 @@ export function Teacher() {
                       {taskIssues.length > 0 && <ul data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>⚠ {qualityIssueText(lang, q)}</li>)}</ul>}
                       {taskErrors.length > 0 && <ul data-testid={`t-task-err-${i}`}>{taskErrors.map((e) => <li key={e}>⚠ {errText(e)}</li>)}</ul>}
                     </div>
+                  )}
+                  {taskWarnings.length > 0 && (
+                    <p className="rounded-xl border border-warn/40 p-3 text-sm text-warn" data-testid={`t-task-warn-${i}`}>
+                      {taskWarnings.map((w) => `💡 ${qualityWarningText(lang, w)}`).join(' ')}
+                    </p>
                   )}
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <select className="input max-w-full" value={task.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })} aria-label={t('tTaskN', { n: i + 1 })}>

@@ -297,3 +297,39 @@ export function qualityIssueText(lang: Language, q: QualityIssue): string {
   if (q.code === 'duplicate-skill') return `Задание ${n}: тип «${skill}» повторяется — нужно по одному заданию каждого типа`;
   return `Задание ${n} (${skill}): в наборе ${q.setIndex + 1} нужно минимум два разных предложения`;
 }
+
+// ---------- Мягкие предупреждения для учителя (не блокируют сохранение) ----------
+
+export interface QualityWarning { code: 'answer-in-one-sentence'; taskIndex: number; sentenceId: string; overlap: number }
+
+/** Грубые основы слов: первые 4 символа слов от 3 букв (работает и для казахских, и для русских окончаний). */
+const stems = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3).map((w) => w.slice(0, 4));
+
+/**
+ * Сопоставление, которое на деле отвечается одним предложением: почти все основы слов правильного варианта
+ * есть в одном из предложений-доказательств. Эвристика — подсказывает учителю, что проверить; решение за ним.
+ */
+export function qualityWarnings(lesson: Pick<Lesson, 'tasks' | 'sentences'>, threshold = 0.8): QualityWarning[] {
+  const text = new Map(lesson.sentences.map((s) => [s.id, new Set(stems(s.text))]));
+  const out: QualityWarning[] = [];
+  lesson.tasks.forEach((t, i) => {
+    if (t.skill !== 'match') return;
+    const answer = stems(t.options.find((o) => o.id === t.correctOptionId)?.text ?? '');
+    if (answer.length < 2) return;
+    let best: QualityWarning | null = null;
+    for (const sid of new Set(t.evidenceSets.flat())) {
+      const st = text.get(sid);
+      if (!st) continue;
+      const overlap = answer.filter((w) => st.has(w)).length / answer.length;
+      if (overlap >= threshold && (!best || overlap > best.overlap)) best = { code: 'answer-in-one-sentence', taskIndex: i, sentenceId: sid, overlap: +overlap.toFixed(2) };
+    }
+    if (best) out.push(best);
+  });
+  return out;
+}
+
+export function qualityWarningText(lang: Language, w: QualityWarning): string {
+  return lang === 'kk'
+    ? `${w.taskIndex + 1}-тапсырма: жауап толығымен ${w.sentenceId} сөйлемінде тұрған сияқты. Екінші сөйлемсіз жауап табылмайтынын тексеріңіз — әйтпесе бұл «дерек табу».`
+    : `Задание ${w.taskIndex + 1}: похоже, ответ целиком есть в ${w.sentenceId}. Проверьте, что без второго предложения ответить нельзя — иначе это «найти факт», а не сопоставление.`;
+}

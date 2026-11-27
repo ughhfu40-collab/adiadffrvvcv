@@ -114,3 +114,27 @@ describe('недостающее доказательство: отзыв зав
     expect(feedbackText('kk', checkAnswer(kk.tasks[2]!, 'b', ['s6']), kk.tasks[2]!)).toMatch(/Қорытындыға тағы бір тірек керек/);
   });
 });
+
+import { qualityWarnings } from '../../shared/lesson';
+import { readFileSync } from 'node:fs';
+
+describe('мягкое предупреждение: сопоставление отвечается одним предложением', () => {
+  const draft = (f: string) => JSON.parse(readFileSync(f, 'utf8')).draft;
+  it('ловит реальные черновики Gemma kk-solar и kk-bus (до и после улучшения промпта)', () => {
+    for (const f of ['docs/gemma-run-qa/kk-solar.json', 'docs/gemma-run-qa/kk-bus.json', 'docs/gemma-run-qa/retry/kk-solar.json', 'docs/gemma-run-qa/retry/kk-bus.json']) {
+      const w = qualityWarnings(draft(f));
+      expect(w.map((x) => x.taskIndex), f).toEqual([1]);
+    }
+  });
+  it('не срабатывает на честном сопоставлении (ru-radio) и на встроенных уроках', () => {
+    expect(qualityWarnings(draft('docs/gemma-run-qa/ru-radio.json'))).toEqual([]);
+    for (const l of BUILTIN_LESSONS) expect(qualityWarnings(l), l.id).toEqual([]);
+  });
+});
+
+describe('исправленный учителем t2 (s3 + s4) не помечается', () => {
+  it('docs/pitch/lesson-kk-after-teacher.json', () => {
+    const l = JSON.parse(readFileSync('docs/pitch/lesson-kk-after-teacher.json', 'utf8'));
+    expect(qualityWarnings(l)).toEqual([]);
+  });
+});
