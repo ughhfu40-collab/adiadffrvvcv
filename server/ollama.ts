@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { TaskSchema, LessonSchema, LessonBaseSchema, formatIssues, splitSentences, type Language, type Lesson } from '../shared/lesson';
 
 export const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
-export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'gemma3:12b';
 
 export class OllamaUnavailable extends Error {}
 

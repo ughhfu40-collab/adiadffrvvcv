@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "generate:check": "tsx scripts/ollama-check.ts"
+    "generate:check": "tsx scripts/ollama-check.ts",
+    "rubric": "tsx scripts/rubric-check.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.4.3",
