@@ -145,6 +145,14 @@ describe('сервер: качество, таймаут, отмена', () => {
     const bad = { tasks: goodTasks.tasks.slice(0, 2) };
     expect(assembleDraft(bad, meta, sentences)).toMatchObject({ kind: 'quality', issues: [{ code: 'missing-skill', skill: 'infer' }] });
   });
+  it('одинаковые варианты с разными ID требуют редактирования перед сохранением', () => {
+    const duplicate = structuredClone(goodTasks);
+    duplicate.tasks[0]!.options[1]!.text = '  ВЕСНОЙ  ';
+    expect(assembleDraft(duplicate, meta, sentences)).toMatchObject({
+      kind: 'quality',
+      issues: [{ code: 'duplicate-option-text', skill: 'find', taskIndex: 0 }],
+    });
+  });
   it('промпт содержит пример сопоставления из двух предложений на языке урока', () => {
     const p = buildPrompt('kk', sentences);
     expect(p).toContain('Айгерім');

@@ -237,6 +237,69 @@ function Mark({ ok }: { ok: boolean }) {
   );
 }
 
+const PROOF_TEST = {
+  ru: {
+    title: 'Проверка на прочность',
+    choose: 'Выбери одну цитату, которую хочешь убрать.',
+    question: 'Хватит ли остальных цитат, чтобы доказать ответ?',
+    keep: 'Оставшихся хватит',
+    need: 'Нужны ещё цитаты',
+    yes: 'Оставшиеся цитаты образуют другой допустимый набор доказательств.',
+    no: 'Без этой цитаты доказательство неполное. Вернись к тексту и подумай, какую деталь она добавляет.',
+    expectedYes: 'Верный вывод:',
+    expectedNo: 'Перепроверь:',
+  },
+  kk: {
+    title: 'Дәлелді сынап көр',
+    choose: 'Алып тастағың келген бір сөйлемді таңда.',
+    question: 'Қалған сөйлемдер жауапты дәлелдеуге жете ме?',
+    keep: 'Қалғаны жеткілікті',
+    need: 'Тағы сөйлем керек',
+    yes: 'Қалған сөйлемдер де жауапты дәлелдейді.',
+    no: 'Бұл сөйлемсіз дәлел толық болмайды. Мәтінге қайта қарап, оның қандай мәлімет қосатынын ойлан.',
+    expectedYes: 'Дұрыс қорытынды:',
+    expectedNo: 'Қайта тексер:',
+  },
+} as const;
+
+function ProofTest({ task, lesson, evidence, order }: { task: Task; lesson: Lesson; evidence: string[]; order: Map<string, number> }) {
+  const t = PROOF_TEST[lesson.language];
+  const [removed, setRemoved] = useState<string | null>(null);
+  const [guess, setGuess] = useState<boolean | null>(null);
+  const remaining = evidence.filter((id) => id !== removed);
+  const enough = checkAnswer(task, task.correctOptionId, remaining).solved;
+  return (
+    <details className="rounded-xl border border-brand/40 bg-brand-soft p-4" data-testid="proof-test">
+      <summary className="cursor-pointer font-semibold text-brand-ink">{t.title}</summary>
+      <fieldset className="mt-3 min-w-0 space-y-2">
+        <legend className="text-sm font-medium">{t.choose}</legend>
+        {evidence.map((id) => (
+          <label key={id} className={`flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm ${removed === id ? 'bg-card line-through' : ''}`}>
+            <input type="radio" name="removed-quote" checked={removed === id}
+              className="mt-0.5 shrink-0 accent-[rgb(var(--brand))]" data-testid={`proof-remove-${id}`}
+              onChange={() => { setRemoved(id); setGuess(null); }} />
+            <span>{(order.get(id) ?? 0) + 1}. {lesson.sentences.find((s) => s.id === id)?.text}</span>
+          </label>
+        ))}
+      </fieldset>
+      {removed && (
+        <div className="mt-2 space-y-2">
+          <p className="text-sm">{t.question}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-ghost text-sm" data-testid="proof-enough" onClick={() => setGuess(true)}>{t.keep}</button>
+            <button type="button" className="btn-ghost text-sm" data-testid="proof-insufficient" onClick={() => setGuess(false)}>{t.need}</button>
+          </div>
+          {guess !== null && (
+            <p className="rounded-lg bg-card p-3 text-sm" role="status" data-testid="proof-feedback" data-correct={guess === enough}>
+              <b>{guess === enough ? t.expectedYes : t.expectedNo}</b> {enough ? t.yes : t.no}
+            </p>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
 function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onExit: () => void; onPlay: (p: Play) => void }) {
   const { lesson } = play;
   const tasks = useMemo(() => play.taskIds.map((id) => lesson.tasks.find((x) => x.id === id)).filter((x): x is Task => !!x), [play, lesson]);
@@ -402,6 +465,7 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                   {parts.tip && <p className="pl-[34px] text-sm text-muted" data-testid="feedback-tip">{parts.tip}</p>}
                 </div>
               )}
+              {result?.solved && evidence.length > 1 && <ProofTest task={task} lesson={lesson} evidence={evidence} order={order} />}
               {saveError && <p role="alert" data-testid="attempt-save-error" className="rounded-xl bg-bad-soft p-3 text-sm text-bad">{t.saveError}</p>}
               {showHint && <p className="rounded-xl border-l-4 border-marker bg-paper p-3 text-sm italic" data-testid="hint">{task.hint}</p>}
               {!result && (!option || evidence.length === 0) && <p className="text-sm text-muted">{t.needBoth}</p>}

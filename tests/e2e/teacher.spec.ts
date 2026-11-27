@@ -90,6 +90,58 @@ test('поломанный JSON статуса генерации оставля
   await expect(question).toHaveValue('Ручная правка');
 });
 
+test('ответ модели не затирает правку, сделанную во время генерации', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  let release = () => {};
+  const responseGate = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/generate', async route => {
+    await responseGate;
+    await route.continue();
+  });
+  const question = page.getByTestId('t-task-0').getByPlaceholder('Вопрос');
+  try {
+    await page.getByTestId('t-text').fill('Первое. Второе. Третье. Четвёртое. Пятое.');
+    await page.getByTestId('t-generate').click();
+    await expect(page.getByTestId('t-elapsed')).toBeVisible();
+    await question.fill('Правка во время генерации');
+  } finally {
+    release();
+  }
+  await expect(page.getByTestId('t-generate')).toHaveText(/Сгенерировать/);
+  await expect(question).toHaveValue('Правка во время генерации', { timeout: 4000 });
+  expect((await exportJson(page)).tasks[0]?.question).toBe('Правка во время генерации');
+  await page.getByTestId('t-open-generated').click();
+  await expect(question).toHaveValue('Вопрос t1');
+  expect((await exportJson(page)).sentences).toHaveLength(5);
+});
+
+test('повторяющиеся ID можно исправить без удаления вопросов и вариантов', async ({ page }) => {
+  await generate(page, 'МАРКЕР-ПОВТОР-ID в тексте. Второе предложение. Третье предложение.');
+  const first = page.getByTestId('t-task-0');
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+  await page.getByTestId('t-fix-ids-0').click({ timeout: 4000 });
+  await expect(first.getByRole('radio', { checked: true })).toHaveCount(0);
+  await expect(first.getByRole('textbox', { name: 'Вариант a', exact: true })).toHaveValue('Первый вариант');
+  await expect(first.getByRole('textbox', { name: 'Вариант b', exact: true })).toHaveValue('Второй вариант');
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+  await first.getByRole('radio', { name: 'Правильный ответ: b', exact: true }).check();
+  await page.getByTestId('t-fix-ids-1').click();
+  const lesson = await exportJson(page);
+  expect(lesson.tasks.map(t => t.id)).toEqual(['t1', 't2', 't3']);
+  expect(lesson.tasks[0]?.correctOptionId).toBe('b');
+  expect(lesson.tasks.map(t => t.question)).toEqual(['Вопрос t1', 'Вопрос t1', 'Вопрос t3']);
+});
+
+test('одинаковые по тексту варианты блокируют экспорт до исправления', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  const option = page.getByTestId('t-task-0').getByRole('textbox', { name: 'Вариант b', exact: true });
+  await option.fill('  ДА  ');
+  await expect(page.getByTestId('t-task-issue-0')).toContainText('одинаковые варианты', { timeout: 4000 });
+  await expect(page.getByTestId('t-export')).toBeDisabled();
+  await option.fill('Нет');
+  expect((await exportJson(page)).tasks[0]?.options.map(o => o.text)).toEqual(['Да', 'Нет']);
+});
+
 test('устаревшая правка в другой вкладке не стирает сохранённый черновик', async ({ page, context }) => {
   await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
   const question = (p: Page) => p.getByTestId('t-task-0').getByPlaceholder('Вопрос');

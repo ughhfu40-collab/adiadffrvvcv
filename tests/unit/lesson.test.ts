@@ -63,9 +63,14 @@ describe('проверка ответа и доказательства отде
     expect(checkAnswer(infer, 'b', ['s7', 's6']).solved).toBe(true);
   });
   it('несколько допустимых наборов доказательств', () => {
+    const task = { ...match, evidenceSets: [['s4', 's5'], ['s3', 's5']] };
+    expect(checkAnswer(task, 'c', ['s4', 's5']).solved).toBe(true);
+    expect(checkAnswer(task, 'c', ['s3', 's5']).solved).toBe(true);
+    expect(checkAnswer(task, 'c', ['s4', 's3']).solved).toBe(false);
+  });
+  it('численность сайгаков не доказывает, что делали учёные и инспекторы', () => {
+    expect(checkAnswer(match, 'c', ['s3', 's5']).solved).toBe(false);
     expect(checkAnswer(match, 'c', ['s4', 's5']).solved).toBe(true);
-    expect(checkAnswer(match, 'c', ['s3', 's5']).solved).toBe(true);
-    expect(checkAnswer(match, 'c', ['s4', 's3']).solved).toBe(false);
   });
   it('казахский отзыв', () => {
     expect(feedbackText('kk', checkAnswer(find, 'b', ['s2']), find)).toMatch(/Жауап дұрыс/);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from 'react';
 import { qualityWarnings, qualityWarningText, hasEnoughReadingText, isEditableDraft, qualityIssues, qualityIssueText, readStoredDraft, splitSentences, validateLesson, type Language, type Lesson, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
@@ -15,6 +15,14 @@ type GenMessage =
   | { kind: 'input'; errors: string[] };
 
 type SaveStatus = { draft: Lesson } & ({ kind: 'saved'; lesson: Lesson } | { kind: 'error' });
+type GeneratedDraft = { draft: Lesson; errors: string[] };
+
+function nextTaskNumber(tasks: Task[]) {
+  const ids = new Set(tasks.map((task) => task.id));
+  let number = 1;
+  while (ids.has(`t${number}`)) number++;
+  return number;
+}
 
 export function Teacher() {
   const { t, lang } = useI18n();
@@ -26,6 +34,8 @@ export function Teacher() {
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const [draft, setDraft] = useState<Lesson | null>(null);
+  const draftEdits = useRef(0);
+  const [pendingGeneration, setPendingGeneration] = useState<GeneratedDraft | null>(null);
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [structErrors, setStructErrors] = useState<string[]>([]);
@@ -37,7 +47,11 @@ export function Teacher() {
   const [saving, setSaving] = useState(false);
   /** Ревизия загруженного черновика: меняется при каждой загрузке извне и пересоздаёт поля редактора. */
   const [rev, setRev] = useState(0);
-  const loadDraft = (d: Lesson) => { setDraft(d); setRev((r) => r + 1); };
+  const updateDraft = (value: SetStateAction<Lesson | null>) => {
+    draftEdits.current++;
+    setDraft(value);
+  };
+  const loadDraft = (d: Lesson) => { updateDraft(d); setRev((r) => r + 1); };
   const sentences = useMemo(() => splitSentences(text), [text]);
 
   useEffect(() => {
@@ -100,24 +114,32 @@ export function Teacher() {
   const ollamaOk = health && 'ollama' in health && health.ollama.ok;
   const limitSec = health && 'timeoutSec' in health && health.timeoutSec ? health.timeoutSec : 600;
 
+  function openGeneration(generated: GeneratedDraft) {
+    loadDraft(generated.draft);
+    setServerErrors(generated.errors);
+    setPendingGeneration(null);
+  }
+
   async function generate() {
     if (abortRef.current) return;
+    const requestedRevision = draftEdits.current;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setBusy(true); setGenMsg(null); setServerErrors([]); setStructErrors([]); setSaveStatus(null);
+    setBusy(true); setGenMsg(null); setStructErrors([]);
     try {
       const r = await fetch(`${API_URL}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, language, title }), signal: ctrl.signal });
       const body = readGenerateResponse(await r.json());
+      ctrl.signal.throwIfAborted();
       if (!body) {
         if (r.status >= 500) setGenMsg({ kind: 'server-down', reason: `HTTP ${r.status}` });
         else setStructErrors(['—']);
         return;
       }
-      // Черновик меняется только при успешном или редактируемом ответе; во всех остальных случаях правки учителя остаются.
-      if (body.ok && isEditableDraft(body.lesson)) loadDraft(body.lesson);
-      else if ((body.kind === 'references' || body.kind === 'quality') && isEditableDraft(body.draft)) {
-        loadDraft(body.draft);
-        if (body.kind === 'references') setServerErrors(body.errors ?? []);
+      const candidate = body.ok ? body.lesson : (body.kind === 'references' || body.kind === 'quality') ? body.draft : null;
+      if (isEditableDraft(candidate)) {
+        const generated = { draft: candidate, errors: body.kind === 'references' ? body.errors ?? [] : [] };
+        if (draftEdits.current === requestedRevision) openGeneration(generated);
+        else setPendingGeneration(generated);
       } else if (body.kind === 'timeout') setGenMsg({ kind: 'timeout', sec: body.timeoutSec ?? limitSec });
       else if (body.kind === 'unavailable') setGenMsg({ kind: 'unavailable', reason: body.reason ?? '', command: body.startCommand ?? '' });
       else if (body.kind === 'input' || r.status === 400) setGenMsg({ kind: 'input', errors: body.errors ?? [] });
@@ -136,14 +158,23 @@ export function Teacher() {
     loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || t('tNewLesson'), language, grade: 8, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
-  const updTask = (i: number, patch: Partial<Task>) => setDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+  const updTask = (i: number, patch: Partial<Task>) => updateDraft((d) => d && { ...d, tasks: d.tasks.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+
+  function repairIds(i: number, task: Task, duplicateTask: boolean, duplicateOptions: boolean) {
+    if (!draft) return;
+    const patch: Partial<Task> = {};
+    if (duplicateTask) patch.id = `t${nextTaskNumber(draft.tasks)}`;
+    if (duplicateOptions) {
+      const oldCorrect = task.options.map((option, index) => ({ option, index })).filter(({ option }) => option.id === task.correctOptionId);
+      patch.options = task.options.map((option, index) => ({ ...option, id: String.fromCharCode(97 + index) }));
+      patch.correctOptionId = oldCorrect.length === 1 ? patch.options[oldCorrect[0]!.index]!.id : '';
+    }
+    updTask(i, patch);
+  }
 
   function addMissingTask() {
     if (!draft || !missingSkill || draft.tasks.length >= 3) return;
-    const taskIds = new Set(draft.tasks.map((task) => task.id));
-    let number = 1;
-    while (taskIds.has(`t${number}`)) number++;
-    setDraft({ ...draft, tasks: [...draft.tasks, emptyTask(number, missingSkill.skill)] });
+    updateDraft({ ...draft, tasks: [...draft.tasks, emptyTask(nextTaskNumber(draft.tasks), missingSkill.skill)] });
   }
 
   async function save() {
@@ -249,6 +280,13 @@ export function Teacher() {
             <ul className="list-disc pl-5">{structErrors.slice(0, 6).map((e) => <li key={e}>{e}</li>)}</ul>
           </div>
         )}
+        {pendingGeneration && (
+          <div className="space-y-2 rounded-xl bg-warn-soft p-3 text-sm text-warn">
+            <p role="status">{t('tPendingGeneration')}</p>
+            <button type="button" className="btn-ghost" disabled={busy} data-testid="t-open-generated"
+              onClick={() => openGeneration(pendingGeneration)}>{t('tOpenGenerated')}</button>
+          </div>
+        )}
       </section>
 
       <section id="t-step-2" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-2-title" data-testid={draft ? 't-draft' : undefined}>
@@ -263,11 +301,13 @@ export function Teacher() {
                 <ul className="list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
               </div>
             )}
-            <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+            <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => updateDraft({ ...draft, title: e.target.value })} />
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);
               const taskWarnings = warnings.filter((w) => w.taskIndex === i);
               const taskErrors = allErrors.filter((e) => taskOf(e) === i);
+              const duplicateTask = draft.tasks.slice(0, i).some((item) => item.id === task.id);
+              const duplicateOptions = new Set(task.options.map((option) => option.id)).size < task.options.length;
               const flagged = taskIssues.length > 0 || taskErrors.length > 0;
               return (
                 <fieldset key={`${rev}-${i}`} data-testid={`t-task-${i}`} data-issue={taskIssues.length > 0}
@@ -279,6 +319,10 @@ export function Teacher() {
                       {taskIssues.length > 0 && <ul data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>⚠ {qualityIssueText(lang, q)}</li>)}</ul>}
                       {taskErrors.length > 0 && <ul data-testid={`t-task-err-${i}`}>{taskErrors.map((e) => <li key={e}>⚠ {errText(e)}</li>)}</ul>}
                     </div>
+                  )}
+                  {(duplicateTask || duplicateOptions) && (
+                    <button type="button" className="btn-ghost" data-testid={`t-fix-ids-${i}`}
+                      onClick={() => repairIds(i, task, duplicateTask, duplicateOptions)}>{t('tRepairIds')}</button>
                   )}
                   {taskWarnings.length > 0 && (
                     <p className="rounded-xl border border-warn/40 p-3 text-sm text-warn" data-testid={`t-task-warn-${i}`}>
@@ -331,7 +375,7 @@ export function Teacher() {
         <div className="flex flex-wrap gap-2">
           <button className="btn" disabled={!canSave || saving} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
           <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
-          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => setDraft(null)}>{t('tDelete')}</button>}
+          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => updateDraft(null)}>{t('tDelete')}</button>}
         </div>
         {saveStatus?.draft === draft && saveStatus.kind === 'error' && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-save-error">{t('tSaveError')}</p>}
         {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">

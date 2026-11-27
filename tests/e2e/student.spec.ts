@@ -8,6 +8,48 @@ async function answer(page: Page, opt: string, sents: string[]) {
   await page.getByTestId('check').click();
 }
 
+test('проверка на прочность работает без сети и не меняет прогресс', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30000 });
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByTestId('lesson-ru-saiga').click();
+  await answer(page, 'b', ['s1']);
+  await expect(page.getByTestId('proof-test')).toHaveCount(0);
+  await page.getByTestId('next').click();
+  await answer(page, 'c', ['s4', 's5']);
+  const drill = page.getByTestId('proof-test');
+  await drill.locator('summary').click();
+  await page.getByTestId('proof-remove-s4').check();
+  await page.getByTestId('proof-enough').click();
+  await expect(page.getByTestId('proof-feedback')).toHaveAttribute('data-correct', 'false');
+  await page.getByTestId('proof-insufficient').click();
+  await expect(page.getByTestId('proof-feedback')).toHaveAttribute('data-correct', 'true');
+  await page.getByTestId('proof-remove-s5').check();
+  await expect(page.getByTestId('proof-feedback')).toHaveCount(0);
+  await expect(page.getByTestId('sent-s4')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '← К урокам' }).click();
+  await page.reload();
+  await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 2 из 3');
+  await expect(page.getByTestId('progress-match')).toContainText('попыток: 1');
+});
+
+test('дәлелді сынау принимает оставшийся допустимый набор цитат', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('lesson-kk-balkhash').click();
+  await answer(page, 'b', ['s2']);
+  await page.getByTestId('next').click();
+  await answer(page, 'a', ['s2', 's3']);
+  await page.getByTestId('next').click();
+  await answer(page, 'b', ['s4', 's5', 's6']);
+  await page.getByTestId('proof-test').locator('summary').click();
+  await expect(page.getByTestId('proof-test')).toContainText('Дәлелді сынап көр');
+  await page.getByTestId('proof-remove-s6').check();
+  await page.getByTestId('proof-enough').click();
+  await expect(page.getByTestId('proof-feedback')).toHaveAttribute('data-correct', 'true');
+  await expect(page.getByTestId('proof-feedback')).toContainText('Қалған сөйлемдер де жауапты дәлелдейді');
+});
+
 test('без доступа к кешу приложение сообщает об этом, а уроки остаются доступны', async ({ page }) => {
   await page.addInitScript(() => Object.defineProperty(window, 'caches', { value: undefined }));
   await page.goto('/');

@@ -16,6 +16,13 @@ function reply(full: string): unknown {
   if (prompt.includes('МАРКЕР-TASKS')) return { tasks: {} };
   if (prompt.includes('МАРКЕР-MISSING')) return { tasks: [{ id: 't1', skill: 'find', options: [{ id: 'a', text: 'Да' }], correctOptionId: 'a' }] };
   if (prompt.includes('МАРКЕР-OPTIONS')) return { tasks: [task('t1', 'find', [['s1']], { options: null })] };
+  if (prompt.includes('МАРКЕР-ПОВТОР-ID')) return {
+    tasks: [
+      task('t1', 'find', [['s1']], { options: [{ id: 'a', text: 'Первый вариант' }, { id: 'a', text: 'Второй вариант' }] }),
+      task('t1', 'match', [['s1', 's2']]),
+      task('t3', 'infer', [['s2', last]]),
+    ],
+  };
   if (prompt.includes('МАРКЕР-ID')) return { tasks: [task('t1', 'find', [['s99']]), task('t2', 'match', [['s1', 's2']], { correctOptionId: 'z' }), task('t3', 'infer', [['s2', last]])] };
   if (prompt.includes('МАРКЕР-QUALITY')) return { tasks: [task('t1', 'find', [['s1']]), task('t2', 'match', [['s2']]), task('t3', 'infer', [['s1', 's2']])] };
   if (prompt.includes('МАРКЕР-ДУБЛЬ')) return { tasks: [task('t1', 'find', [['s1']]), task('t2', 'match', [['s1', 's2']]), task('t3', 'match', [['s2', 's3']])] };

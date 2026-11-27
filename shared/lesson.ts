@@ -81,6 +81,7 @@ const StoredDraftSchema = LessonBaseSchema.extend({
   tasks: z.array(TaskSchema.extend({
     question: z.string(),
     options: z.array(OptionSchema.extend({ text: z.string() })).min(2).max(6),
+    correctOptionId: z.string(),
     evidenceSets: z.array(z.array(z.string().min(1))),
     hint: z.string(),
   })).min(1),
@@ -295,15 +296,18 @@ export function recommendNext(
 export type QualityIssue =
   | { code: 'missing-skill'; skill: Skill; taskIndex: null }
   | { code: 'duplicate-skill'; skill: Skill; taskIndex: number }
+  | { code: 'duplicate-option-text'; skill: Skill; taskIndex: number }
   | { code: 'too-few-evidence'; skill: Skill; taskIndex: number; setIndex: number };
 
-/** По одному заданию каждого типа; у сопоставления и вывода каждый набор — минимум два разных предложения. */
+/** По одному заданию каждого типа, различимые варианты, минимум два доказательства для match и infer. */
 export function qualityIssues(lesson: Pick<Lesson, 'tasks'>): QualityIssue[] {
   const issues: QualityIssue[] = [];
   const seen = new Set<Skill>();
   lesson.tasks.forEach((t, i) => {
     if (seen.has(t.skill)) issues.push({ code: 'duplicate-skill', skill: t.skill, taskIndex: i });
     seen.add(t.skill);
+    const answers = t.options.map((option) => option.text.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()).filter(Boolean);
+    if (new Set(answers).size < answers.length) issues.push({ code: 'duplicate-option-text', skill: t.skill, taskIndex: i });
     if (t.skill === 'match' || t.skill === 'infer') {
       t.evidenceSets.forEach((set, si) => {
         if (new Set(set).size < 2) issues.push({ code: 'too-few-evidence', skill: t.skill, taskIndex: i, setIndex: si });
@@ -320,10 +324,12 @@ export function qualityIssueText(lang: Language, q: QualityIssue): string {
   if (lang === 'kk') {
     if (q.code === 'missing-skill') return `«${skill}» түріндегі тапсырма жоқ`;
     if (q.code === 'duplicate-skill') return `${n}-тапсырма: «${skill}» түрі қайталанады — әр түрден бір тапсырма керек`;
+    if (q.code === 'duplicate-option-text') return `${n}-тапсырмада бірдей жауап нұсқалары бар. Оларды бір-бірінен ажырататындай етіп жазыңыз.`;
     return `${n}-тапсырма (${skill}): ${q.setIndex + 1}-жиында кемінде екі түрлі сөйлем болуы керек`;
   }
   if (q.code === 'missing-skill') return `Нет задания типа «${skill}»`;
   if (q.code === 'duplicate-skill') return `Задание ${n}: тип «${skill}» повторяется — нужно по одному заданию каждого типа`;
+  if (q.code === 'duplicate-option-text') return `Задание ${n} содержит одинаковые варианты ответа. Сформулируйте их по-разному.`;
   return `Задание ${n} (${skill}): в наборе ${q.setIndex + 1} нужно минимум два разных предложения`;
 }
 
