@@ -1,7 +1,8 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import { DEFAULT_GRADE, GradeSchema, hasEnoughReadingText, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
+import { reviewLesson, repairTask } from './review';
+import { DEFAULT_GRADE, GradeSchema, hasEnoughReadingText, LessonSchema, MAX_SENTENCES, MAX_TEXT_CHARS, MIN_SENTENCES, splitSentences, validateLesson } from '../shared/lesson';
 import { GenerationCancelled, GenerationTimeout, generateLesson, ollamaStatus, OllamaUnavailable, OLLAMA_MODEL, TIMEOUT_MS } from './ollama';
 
 const GenerateBody = z.object({
@@ -62,11 +63,35 @@ export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fe
       const errors = body.error.issues.filter((i) => { const k = i.path.join('.'); if (seen.has(k)) return false; seen.add(k); return true; }).map((i) => i.message);
       return reply.code(400).send({ ok: false, kind: 'input', errors });
     }
+    return runModel(reply, (signal) => generateLesson(body.data, opts.fetchImpl ?? fetch, signal, timeoutMs));
+  });
+
+  const ReviewBody = z.object({ lesson: LessonSchema });
+  const RepairBody = z.object({ lesson: LessonSchema, taskId: z.string().min(1), problems: z.array(z.string().max(500)).max(20).default([]) });
+  const badInput = (reply: FastifyReply, error: z.ZodError) =>
+    reply.code(400).send({ ok: false, kind: 'input', errors: error.issues.slice(0, 8).map((i) => `${i.path.join('.')}: ${i.message}`) });
+
+  // Вторая проверка ИИ: модель перечитывает задания по тексту. Замечания — подсказка учителю, не блокировка.
+  app.post('/api/review', async (req, reply) => {
+    const body = ReviewBody.safeParse(req.body);
+    if (!body.success) return badInput(reply, body.error);
+    return runModel(reply, (signal) => reviewLesson(body.data.lesson, opts.fetchImpl ?? fetch, signal, timeoutMs));
+  });
+
+  // Исправление одного задания по замечаниям; результат проходит ту же автоматическую проверку.
+  app.post('/api/repair', async (req, reply) => {
+    const body = RepairBody.safeParse(req.body);
+    if (!body.success) return badInput(reply, body.error);
+    return runModel(reply, (signal) => repairTask(body.data.lesson, body.data.taskId, body.data.problems, opts.fetchImpl ?? fetch, signal, timeoutMs));
+  });
+
+  /** Общий запуск модели: отмена при закрытии соединения, таймаут, недоступность — одинаково для генерации, проверки и исправления. */
+  async function runModel(reply: FastifyReply, fn: (signal: AbortSignal) => Promise<{ ok: boolean }>) {
     // Клиент закрыл соединение (кнопка «Отменить») — прерываем запрос к Ollama, чтобы не грузить ноутбук зря.
     const cancel = new AbortController();
     reply.raw.on('close', () => { if (!reply.raw.writableFinished) cancel.abort(); });
     try {
-      const r = await generateLesson(body.data, opts.fetchImpl ?? fetch, cancel.signal, timeoutMs);
+      const r = await fn(cancel.signal);
       return r.ok ? r : reply.code(422).send(r);
     } catch (e) {
       if (e instanceof GenerationTimeout) return reply.code(504).send({ ok: false, kind: 'timeout', reason: e.message, timeoutSec: Math.round(timeoutMs / 1000) });
@@ -74,6 +99,6 @@ export async function buildApp(opts: { timeoutMs?: number; fetchImpl?: typeof fe
       if (e instanceof OllamaUnavailable) return reply.code(503).send({ ok: false, kind: 'unavailable', reason: e.message, startCommand: startCommand() });
       throw e;
     }
-  });
+  }
   return app;
 }

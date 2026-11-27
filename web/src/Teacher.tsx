@@ -3,6 +3,7 @@ import { DEFAULT_GRADE, DEFAULT_LESSON_TITLE, GRADES, GradeSchema, MAX_SENTENCES
 import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
+import { AiReviewBar, AiTaskNote, useAiReview } from './AiReview';
 
 const emptyTask = (n: number, skill: Skill): Task => ({ id: `t${n}`, skill, question: '', options: [{ id: 'a', text: '' }, { id: 'b', text: '' }, { id: 'c', text: '' }], correctOptionId: 'a', evidenceSets: [[]], hint: '' });
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -34,6 +35,7 @@ export function Teacher() {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const ai = useAiReview();
   const [draft, setDraft] = useState<Lesson | null>(null);
   const draftEdits = useRef(0);
   const [pendingGeneration, setPendingGeneration] = useState<GeneratedDraft | null>(null);
@@ -122,6 +124,10 @@ export function Teacher() {
     loadDraft(generated.draft);
     setServerErrors(generated.errors);
     setPendingGeneration(null);
+    // Вторая проверка ИИ запускается сама, если черновик проходит схему; иначе её можно запустить после правки.
+    ai.reset();
+    const checked = validateLesson(generated.draft);
+    if (checked.ok) void ai.run(checked.lesson);
   }
 
   async function generate() {
@@ -159,6 +165,7 @@ export function Teacher() {
   }
 
   function manualDraft() {
+    ai.reset();
     loadDraft({ id: `manual-${Date.now().toString(36)}`, title: title.trim() || DEFAULT_LESSON_TITLE[language], language, grade, sentences, tasks: [emptyTask(1, 'find'), emptyTask(2, 'match'), emptyTask(3, 'infer')] });
   }
 
@@ -311,6 +318,7 @@ export function Teacher() {
               </div>
             )}
             <p className="text-sm text-muted" data-testid="t-draft-grade">{t('grade', { g: draft.grade })}</p>
+            <AiReviewBar ai={ai} lesson={validation?.ok ? validation.lesson : null} canRun={!!ollamaOk && !busy} />
             <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => updateDraft({ ...draft, title: e.target.value })} />
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);
@@ -334,6 +342,8 @@ export function Teacher() {
                     <button type="button" className="btn-ghost" data-testid={`t-fix-ids-${i}`}
                       onClick={() => repairIds(i, task, duplicateTask, duplicateOptions)}>{t('tRepairIds')}</button>
                   )}
+                  <AiTaskNote ai={ai} lesson={validation?.ok ? validation.lesson : null} task={task} index={i}
+                    onReplace={(fixed) => { updTask(i, fixed); setRev((r) => r + 1); }} />
                   {taskWarnings.length > 0 && (
                     <p className="rounded-xl border border-warn/40 p-3 text-sm text-warn" data-testid={`t-task-warn-${i}`}>
                       {taskWarnings.map((w) => `💡 ${qualityWarningText(lang, w)}`).join(' ')}

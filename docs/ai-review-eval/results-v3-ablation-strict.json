@@ -1,0 +1,266 @@
+[
+  {
+    "case": "kk-robot (новый текст)",
+    "task": "t1",
+    "truth": "опечатка «Мұсиқа»",
+    "flagged": false,
+    "verdict": "ПРОПУЩЕНО",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": true,
+      "language": true
+    },
+    "problems": [],
+    "secs": 136
+  },
+  {
+    "case": "kk-robot (новый текст)",
+    "task": "t2",
+    "truth": "два верных варианта, нескладный вопрос",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s6 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 136
+  },
+  {
+    "case": "kk-robot (новый текст)",
+    "task": "t3",
+    "truth": "несуществующее «су аяқтау», цитаты не по делу",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s6 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 136
+  },
+  {
+    "case": "kk-bus",
+    "task": "t1",
+    "truth": "опечатка «Отзық»",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": true,
+      "language": false
+    },
+    "problems": [
+      "Тіл: «Отзық шақырым.» → «Отыз шақырым.»."
+    ],
+    "secs": 143
+  },
+  {
+    "case": "kk-bus",
+    "task": "t2",
+    "truth": "«оқушыдан» вместо «оқытушыдан», ответ в одном s4",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": false
+    },
+    "problems": [
+      "Жауапты бір ғана s4 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.",
+      "Тіл: «Мектептегі оқушыдан тапсырма алып орындады.» → «Мектепте тапсырма алып орындады.».",
+      "Тіл: «Телефон арқылы оқушыдан тапсырма алып орындады.» → «Телефон арқылы тапсырма алып орындады.».",
+      "Тіл: «Интернет арқылы оқушыдан тапсырма алып орындады.» → «Интернет арқылы тапсырма алып орындады.»."
+    ],
+    "secs": 143
+  },
+  {
+    "case": "kk-bus",
+    "task": "t3",
+    "truth": "«білім» вместо «үлгерім», s5 не нужен",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s7 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 143
+  },
+  {
+    "case": "kk-solar",
+    "task": "t1",
+    "truth": null,
+    "flagged": false,
+    "verdict": "верно: чисто",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": true,
+      "language": true
+    },
+    "problems": [],
+    "secs": 122
+  },
+  {
+    "case": "kk-solar",
+    "task": "t2",
+    "truth": "ответ целиком в s6",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s6 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 122
+  },
+  {
+    "case": "kk-solar",
+    "task": "t3",
+    "truth": "лишнее «үнемі көреді», одинаковое начало вариантов",
+    "flagged": true,
+    "verdict": "поймано",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s7 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 122
+  },
+  {
+    "case": "kk после правки учителя",
+    "task": "t1",
+    "truth": null,
+    "flagged": false,
+    "verdict": "верно: чисто",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": true,
+      "language": true
+    },
+    "problems": [],
+    "secs": 113
+  },
+  {
+    "case": "kk после правки учителя",
+    "task": "t2",
+    "truth": null,
+    "flagged": true,
+    "verdict": "ЛОЖНАЯ ТРЕВОГА",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s3 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.",
+      "Жауапты бір ғана s4 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 113
+  },
+  {
+    "case": "kk после правки учителя",
+    "task": "t3",
+    "truth": null,
+    "flagged": true,
+    "verdict": "ЛОЖНАЯ ТРЕВОГА",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s6 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.",
+      "Жауапты бір ғана s7 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 113
+  },
+  {
+    "case": "kk-feeder (встроенный)",
+    "task": "t1",
+    "truth": null,
+    "flagged": false,
+    "verdict": "верно: чисто",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": true,
+      "language": true
+    },
+    "problems": [],
+    "secs": 103
+  },
+  {
+    "case": "kk-feeder (встроенный)",
+    "task": "t2",
+    "truth": null,
+    "flagged": true,
+    "verdict": "ЛОЖНАЯ ТРЕВОГА",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s4 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.",
+      "Жауапты бір ғана s5 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 103
+  },
+  {
+    "case": "kk-feeder (встроенный)",
+    "task": "t3",
+    "truth": null,
+    "flagged": true,
+    "verdict": "ЛОЖНАЯ ТРЕВОГА",
+    "checks": {
+      "answer": true,
+      "one": true,
+      "evidence": false,
+      "language": true
+    },
+    "problems": [
+      "Жауапты бір ғана s4 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес.",
+      "Жауапты бір ғана s6 сөйлемі бойынша таңдауға болады — дәлелдегі екінші сөйлем қажет емес."
+    ],
+    "secs": 103
+  },
+  {
+    "case": "ru-bus-library (новый текст)",
+    "secs": 1101,
+    "error": {
+      "ok": false,
+      "kind": "timeout",
+      "reason": "Модель не ответила за 600 с",
+      "timeoutSec": 600
+    }
+  }
+]

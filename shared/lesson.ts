@@ -380,6 +380,12 @@ export interface QualityWarning { code: 'answer-in-one-sentence'; taskIndex: num
 /** Грубые основы слов: первые 4 символа слов от 3 букв (работает и для казахских, и для русских окончаний). */
 const stems = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3).map((w) => w.slice(0, 4));
 
+/** Доля основ слов из `answer`, встречающихся в `sentence` (0…1). Та же грубая мера, что и в qualityWarnings. */
+export function answerOverlap(answer: string, sentence: string): number {
+  const a = stems(answer); const b = new Set(stems(sentence));
+  return a.length ? a.filter((w) => b.has(w)).length / a.length : 0;
+}
+
 /**
  * Сопоставление, которое на деле отвечается одним предложением: почти все основы слов правильного варианта
  * есть в одном из предложений текста. Это подсказка для учителя.

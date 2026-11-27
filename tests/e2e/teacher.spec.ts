@@ -427,3 +427,37 @@ test('пустой текст из пробелов и точек: генера�
   expect(res.status()).toBe(400);
   expect(calls).toBe(0);
 });
+
+test('проверка ИИ запускается после генерации; чистый черновик — без замечаний, сохранение доступно', async ({ page }) => {
+  await generate(page, 'Первое предложение. Второе предложение. Третье предложение.');
+  await expect(page.getByTestId('t-ai-summary')).toContainText('замечаний не нашёл');
+  await expect(page.getByTestId('t-ai-0')).toHaveAttribute('data-ok', 'true');
+  await expect(page.getByTestId('t-export')).toBeEnabled();
+});
+
+test('проверка ИИ: замечания у задания, «Попросить ИИ исправить» заменяет задание; правка после проверки помечается', async ({ page }) => {
+  await generate(page, 'МАРКЕР-REVIEW-BAD первое. Второе предложение. Третье предложение.');
+  await expect(page.getByTestId('t-ai-summary')).toContainText('1');
+  await expect(page.getByTestId('t-ai-1')).toHaveAttribute('data-ok', 'false');
+  await expect(page.getByTestId('t-ai-problems-1')).toContainText('Вариант b тоже подтверждается текстом');
+  // Замечания ИИ не блокируют сохранение.
+  await expect(page.getByTestId('t-export')).toBeEnabled();
+  await page.getByTestId('t-ai-fix-1').click();
+  await expect(page.getByTestId('t-task-1').getByPlaceholder(/Вопрос/)).toHaveValue('Исправленный вопрос ИИ');
+  // После исправления проверка ИИ запускается заново и показывает новый вердикт (здесь тестовая модель снова находит замечания).
+  await expect(page.getByTestId('t-ai-fixed-1')).toContainText('повторная проверка снова нашла замечания');
+  await expect(page.getByTestId('t-evidence-1')).toHaveValue('s1,s2');
+  expect((await exportJson(page)).tasks[1]!.evidenceSets).toEqual([['s1', 's2']]);
+  // Учитель правит задание 0 после проверки — помечается, что проверка устарела.
+  await page.getByTestId('t-task-0').getByPlaceholder(/Вопрос/).fill('Правка учителя');
+  await expect(page.getByTestId('t-ai-stale-0')).toBeVisible();
+});
+
+test('проверка ИИ: сломанное исправление не меняет задание и объясняет причину', async ({ page }) => {
+  await generate(page, 'МАРКЕР-REVIEW-BAD МАРКЕР-REPAIR-BAD первое. Второе предложение. Третье предложение.');
+  await expect(page.getByTestId('t-ai-1')).toHaveAttribute('data-ok', 'false');
+  const before = await page.getByTestId('t-task-1').getByPlaceholder(/Вопрос/).inputValue();
+  await page.getByTestId('t-ai-fix-1').click();
+  await expect(page.getByTestId('t-ai-fix-error-1')).toContainText('не прошло проверку');
+  await expect(page.getByTestId('t-task-1').getByPlaceholder(/Вопрос/)).toHaveValue(before);
+});

@@ -142,42 +142,43 @@ export function assembleDraft(raw: unknown, meta: { id: string; title: string; l
   return issues.length ? { ok: false, kind: 'quality', issues, errors: issues.map((q) => qualityIssueText(meta.language, q)), draft: full.data } : { ok: true, lesson: full.data };
 }
 
-export async function generateLesson(input: { text: string; language: Language; title: string; grade?: Grade }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
-  const sentences = splitSentences(input.text);
-  const grade = input.grade ?? DEFAULT_GRADE;
+export type ModelJson = { ok: true; data: unknown } | { ok: false; kind: 'structure'; errors: string[] };
+
+/** Один вызов модели со структурированным ответом: общий таймаут, отмена и разбор ошибок для генерации, проверки и исправления. */
+export async function callModelJson(prompt: string, format: object, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS, temperature = 0.2): Promise<ModelJson> {
   const signal = cancel ? AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   let body: unknown;
   try {
     const res = await fetchImpl(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        format: DRAFT_JSON_SCHEMA,
-        options: { temperature: 0.2 },
-        messages: [{ role: 'user', content: buildPrompt(input.language, sentences, grade) }],
-      }),
+      body: JSON.stringify({ model: OLLAMA_MODEL, stream: false, format, options: { temperature }, messages: [{ role: 'user', content: prompt }] }),
       signal,
     });
     if (!res.ok) throw new OllamaUnavailable(`Ollama вернула ${res.status}: ${await res.text()}`);
     body = await res.json();
   } catch (e) {
     if (e instanceof OllamaUnavailable) throw e;
-    if (cancel?.aborted) throw new GenerationCancelled('Генерация отменена');
+    if (cancel?.aborted) throw new GenerationCancelled('Запрос к модели отменён');
     if (signal.aborted || (e as Error).name === 'TimeoutError') throw new GenerationTimeout(`Модель не ответила за ${Math.round(timeoutMs / 1000)} с`);
     if (e instanceof SyntaxError) return { ok: false, kind: 'structure', errors: ['Ollama вернула ответ в неверном формате'] };
     throw new OllamaUnavailable(`Ollama недоступна по адресу ${OLLAMA_URL}: ${(e as Error).message}`);
   }
   const chat = OllamaChatSchema.safeParse(body);
-  if (!chat.success) return { ok: false, kind: 'structure', errors: ['В ответе Ollama нет текста черновика'] };
-  let raw: unknown;
+  if (!chat.success) return { ok: false, kind: 'structure', errors: ['В ответе Ollama нет текста'] };
   try {
-    raw = JSON.parse(chat.data.message.content);
+    return { ok: true, data: JSON.parse(chat.data.message.content) };
   } catch {
     return { ok: false, kind: 'structure', errors: ['Модель вернула не JSON'] };
   }
+}
+
+export async function generateLesson(input: { text: string; language: Language; title: string; grade?: Grade }, fetchImpl: typeof fetch = fetch, cancel?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<GenerateResult> {
+  const sentences = splitSentences(input.text);
+  const grade = input.grade ?? DEFAULT_GRADE;
+  const r = await callModelJson(buildPrompt(input.language, sentences, grade), DRAFT_JSON_SCHEMA, fetchImpl, cancel, timeoutMs);
+  if (!r.ok) return r;
   // Время + случайный суффикс: параллельные запросы в одну миллисекунду получают разные ID.
   const slug = `gen-${input.language}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  return assembleDraft(raw, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language, grade }, sentences);
+  return assembleDraft(r.data, { id: slug, title: input.title.trim() || DEFAULT_LESSON_TITLE[input.language], language: input.language, grade }, sentences);
 }

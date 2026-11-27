@@ -250,3 +250,75 @@ describe('сообщения качества — на языке урока', (
     if (!r.ok && r.kind === 'quality') expect(r.errors.join(' ')).toMatch(/түріндегі тапсырма жоқ/);
   });
 });
+
+import { reviewLesson, repairTask, buildOptionProbePrompt, buildAblationPrompt } from '../../server/review';
+import { BUILTIN_LESSONS as BL } from '../../shared/builtin';
+
+describe('вторая проверка ИИ и исправление задания', () => {
+  const lesson = BL.find((l) => l.id === 'kk-feeder')!;
+  const respond = (content: unknown) => (async () => new Response(JSON.stringify({ message: { content: JSON.stringify(content) } }))) as unknown as typeof fetch;
+  it('проверка-«ученик»: верный вариант в промпте не раскрыт; абляция — по одному предложению из доказательства', () => {
+    const p = buildOptionProbePrompt(lesson);
+    expect(p).toContain('s5: Содан кейін');
+    expect(p).not.toContain('correctOptionId');
+    expect(p).toMatch(/тебе НЕ сообщают/);
+    const ab = buildAblationPrompt(lesson);
+    expect(ab).toContain('Проверка t2:s4');
+    expect(ab).toContain('Проверка t2:s5');
+    expect(ab).not.toContain('Проверка t1:');
+  });
+  // Маршрутизация ответов модели по виду запроса.
+  const routed = (opts: { two?: boolean; alone?: boolean; lang?: boolean; skipTask?: string }) => (async (_u: string, init: RequestInit) => {
+    const prompt = JSON.parse(init.body as string).messages[0].content as string;
+    let content: unknown;
+    if (prompt.startsWith('Ты внимательный ученик')) content = { tasks: lesson.tasks.filter((t) => t.id !== opts.skipTask).map((t) => ({ id: t.id, options: t.options.map((o) => ({ id: o.id, verdict: o.id === t.correctOptionId || (opts.two && t.id === 't2') ? 'supported' : 'contradicted', sentenceIds: [] })) })) };
+    else if (prompt.startsWith('Ты ученик')) content = { probes: [...prompt.matchAll(/Проверка (t\d+:s\d+)/g)].map((m) => ({ key: m[1], answer: opts.alone && m[1] === 't2:s5' ? 'b' : 'NONE' })) };
+    else content = { errors: opts.lang ? [{ taskId: 't1', fragment: 'Бидай', fix: 'Бидай' }] : [] };
+    return new Response(JSON.stringify({ message: { content: JSON.stringify(content) } }));
+  }) as unknown as typeof fetch;
+  it('чистый урок — без замечаний', async () => {
+    const r = await reviewLesson(lesson, routed({}));
+    expect(r.ok && r.review.every((x) => x.ok)).toBe(true);
+  });
+  it('два верных варианта, ответ из одного предложения, ошибка языка — находятся механически', async () => {
+    const r = await reviewLesson(lesson, routed({ two: true, alone: true, lang: true }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const [t1, t2, t3] = r.review;
+    expect(t1).toMatchObject({ languageOk: false, ok: false });
+    expect(t2).toMatchObject({ onlyOneCorrect: false, ok: false });
+    expect(t2!.problems.join(' ')).toMatch(/екі дұрыс жауап/);
+    // Модель «ответила» по одному s5, но ответ не повторяет s5 дословно — это не считается дефектом (защита от ложных тревог).
+    expect(t2!.evidenceOk).toBe(true);
+    expect(t3!.ok).toBe(true);
+  });
+  it('ответ дословно из одного предложения + модель решает по нему одному → «второе предложение не нужно»', async () => {
+    const copy = structuredClone(lesson);
+    copy.tasks[1]!.options[1]!.text = 'Содан кейін жемсалғышқа сарышымшықтар да келе бастады';
+    const r = await reviewLesson(copy, routed({ alone: true }));
+    if (r.ok) expect(r.review[1]).toMatchObject({ evidenceOk: false, ok: false });
+  });
+  it('пропущенное моделью задание не считается проверенным', async () => {
+    const r = await reviewLesson(lesson, routed({ skipTask: 't3' }));
+    if (r.ok) expect(r.review.map((x) => x.ok)).toEqual([true, true, false]);
+  });
+  it('исправление сохраняет id и тип, ссылки и правила качества проверяются', async () => {
+    const base = { question: 'Q', options: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }, { id: 'c', text: 'z' }], correctOptionId: 'a', hint: 'h' };
+    const good = await repairTask(lesson, 't2', ['p'], respond({ ...base, id: 'zzz', skill: 'find', evidenceSets: [['s4', 's5']] }));
+    expect(good).toMatchObject({ ok: true, task: { id: 't2', skill: 'match' } });
+    expect(await repairTask(lesson, 't2', [], respond({ ...base, id: 't2', skill: 'match', evidenceSets: [['s99', 's1']] }))).toMatchObject({ ok: false, kind: 'references' });
+    expect(await repairTask(lesson, 't2', [], respond({ ...base, id: 't2', skill: 'match', evidenceSets: [['s4']] }))).toMatchObject({ ok: false, kind: 'quality' });
+    expect(await repairTask(lesson, 't9', [], respond({}))).toMatchObject({ ok: false, kind: 'references' });
+  });
+  it('/api/review и /api/repair: неверный урок — 400 без вызова модели; таймаут — 504', async () => {
+    const spy = vi.fn();
+    const app = await buildApp({ fetchImpl: spy as unknown as typeof fetch });
+    expect((await app.inject({ method: 'POST', url: '/api/review', payload: { lesson: { id: 'x' } } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'POST', url: '/api/repair', payload: { lesson, taskId: '' } })).statusCode).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+    const hang = ((_u: string, init: RequestInit) => new Promise((_r, rej) => init.signal!.addEventListener('abort', () => rej(init.signal!.reason)))) as unknown as typeof fetch;
+    const slow = await buildApp({ fetchImpl: hang, timeoutMs: 30 });
+    const res = await slow.inject({ method: 'POST', url: '/api/review', payload: { lesson } });
+    expect(res.statusCode).toBe(504);
+  });
+});

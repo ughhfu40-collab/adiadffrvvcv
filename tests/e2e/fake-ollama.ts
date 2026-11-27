@@ -9,7 +9,31 @@ const task = (id: string, skill: string, evidence: string[][], extra: Record<str
   id, skill, question: `Вопрос ${id}`, options: [{ id: 'a', text: 'Да' }, { id: 'b', text: 'Нет' }], correctOptionId: 'a', evidenceSets: evidence, hint: 'Подсказка', ...extra,
 });
 
+/** Вторая проверка ИИ и исправление одного задания (server/review.ts). */
+function reviewOrRepair(full: string): unknown | null {
+  const textPart = full.slice(full.lastIndexOf('Текст (ID: предложение):'));
+  const bad = textPart.includes('МАРКЕР-REVIEW-BAD') || full.includes('МАРКЕР-REVIEW-BAD');
+  if (full.startsWith('Ты внимательный ученик')) {
+    // Каждый вариант против текста: при МАРКЕР-REVIEW-BAD во втором задании подтверждаются два варианта.
+    const tasks = [...full.matchAll(/^Задание (t\d+): /gm)].map((m) => m[1]!);
+    return { tasks: tasks.map((id, i) => ({ id, options: ['a', 'b'].map((o) => ({ id: o, verdict: o === 'a' || (bad && i === 1) ? 'supported' : 'contradicted', sentenceIds: [] })) })) };
+  }
+  if (full.startsWith('Ты ученик')) {
+    return { probes: [...full.matchAll(/Проверка (t\d+:s\d+)/g)].map((m) => ({ key: m[1], answer: 'NONE' })) };
+  }
+  if (full.startsWith('Ты корректор')) return { errors: [] };
+  if (full.startsWith('Исправь ОДНО задание')) {
+    const current = JSON.parse(full.trim().split('\n').pop()!) as { id: string; skill: string };
+    const broken = textPart.includes('МАРКЕР-REPAIR-BAD');
+    return { id: current.id, skill: current.skill, question: 'Исправленный вопрос ИИ', options: [{ id: 'a', text: 'Верно' }, { id: 'b', text: 'Неверно' }, { id: 'c', text: 'Тоже неверно' }],
+      correctOptionId: 'a', evidenceSets: broken ? [['s99', 's1']] : current.skill === 'find' ? [['s1']] : [['s1', 's2']], hint: 'Исправленная подсказка' };
+  }
+  return null;
+}
+
 function reply(full: string): unknown {
+  const special = reviewOrRepair(full);
+  if (special) return special;
   const prompt = full.slice(full.lastIndexOf('Текст (ID: предложение):'));
   const ids = [...prompt.matchAll(/^(s\d+): /gm)].map((m) => m[1]!);
   const last = ids[ids.length - 1] ?? 's1';
