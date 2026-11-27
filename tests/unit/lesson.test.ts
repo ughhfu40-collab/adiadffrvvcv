@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkAnswer, feedbackText, parseLessonJson, recommendNext, splitSentences, validateLesson, type Lesson } from '../../shared/lesson';
+import { checkAnswer, feedbackParts, feedbackText, parseLessonJson, recommendNext, splitSentences, validateLesson, type Lesson } from '../../shared/lesson';
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 
 const saiga = BUILTIN_LESSONS.find((l) => l.id === 'ru-saiga')!;
@@ -77,5 +77,19 @@ describe('разбиение и рекомендации', () => {
     expect(rec?.lesson.id).toBe('ru-solar');
     expect(rec?.task.skill).toBe('infer');
     expect(recommendNext(BUILTIN_LESSONS, saiga, [], new Set())).toBeNull();
+  });
+});
+
+describe('два отдельных итога проверки', () => {
+  it('ответ и доказательство оцениваются по отдельности (ru)', () => {
+    expect(feedbackParts('ru', checkAnswer(find, 'a', ['s1']))).toMatchObject({ answer: 'Ответ неверный', evidence: 'Доказательство верное' });
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s3']))).toMatchObject({ answer: 'Ответ верный', evidence: 'Цитата не подтверждает ответ' });
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1', 's2'])).evidence).toBe('Лишнее предложение');
+    expect(feedbackParts('ru', checkAnswer(match, 'c', ['s5'])).evidence).toBe('Доказательства пока не хватает');
+    expect(feedbackParts('ru', checkAnswer(find, 'b', ['s1']))).toEqual({ answer: 'Ответ верный', evidence: 'Доказательство верное', tip: null });
+  });
+  it('казахские строки', () => {
+    expect(feedbackParts('kk', checkAnswer(find, 'a', ['s3']))).toMatchObject({ answer: 'Жауап қате', evidence: 'Үзінді жауапты дәлелдемейді' });
+    expect(feedbackParts('kk', checkAnswer(find, 'b', ['s1']))).toMatchObject({ answer: 'Жауап дұрыс', evidence: 'Дәлел дұрыс', tip: null });
   });
 });

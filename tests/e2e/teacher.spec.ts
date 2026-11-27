@@ -43,7 +43,7 @@ test.beforeEach(async ({ page }) => {
 
 test('e2e работает только с поддельной моделью, а не с настоящей Ollama', async ({ page }) => {
   const health = await (await page.request.get('/api/health')).json();
-  expect(health.ollama).toMatchObject({ ok: true, model: 'fake', url: 'http://127.0.0.1:11535' });
+  expect(health.ollama).toMatchObject({ ok: true, model: 'fake', url: `http://127.0.0.1:${process.env.E2E_FAKE_PORT ?? '11535'}` });
   expect(health.timeoutSec).toBe(5);
 });
 

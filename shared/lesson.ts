@@ -156,6 +156,60 @@ export function feedbackText(lang: Language, r: CheckResult): string {
   return f[r.evidence];
 }
 
+/** Два отдельных итога проверки — ответ и доказательство — и совет, что делать дальше. */
+export interface FeedbackParts { answer: string; evidence: string; tip: string | null }
+
+const PARTS: Record<Language, {
+  answer: Record<'yes' | 'no', string>;
+  evidence: Record<EvidenceVerdict, string>;
+  tip: Record<EvidenceVerdict | 'answerWrong', string>;
+}> = {
+  ru: {
+    answer: { yes: 'Ответ верный', no: 'Ответ неверный' },
+    evidence: {
+      correct: 'Доказательство верное',
+      missing: 'Доказательства пока не хватает',
+      extra: 'Лишнее предложение',
+      wrong: 'Цитата не подтверждает ответ',
+      empty: 'Предложение не отмечено',
+    },
+    tip: {
+      answerWrong: 'Перечитай текст и выбери другой ответ. Отмеченные предложения сохранятся.',
+      correct: '',
+      missing: 'Найди ещё одно предложение, без которого вывод не сделать.',
+      extra: 'Сними выделение с предложения, которое не подтверждает ответ напрямую.',
+      wrong: 'В каком предложении об этом сказано? Сними отметку и выбери другое.',
+      empty: 'Нажми в тексте на предложение, которое подтверждает ответ.',
+    },
+  },
+  kk: {
+    answer: { yes: 'Жауап дұрыс', no: 'Жауап қате' },
+    evidence: {
+      correct: 'Дәлел дұрыс',
+      missing: 'Дәлел әзірге жеткіліксіз',
+      extra: 'Артық сөйлем белгіленген',
+      wrong: 'Үзінді жауапты дәлелдемейді',
+      empty: 'Сөйлем белгіленбеген',
+    },
+    tip: {
+      answerWrong: 'Мәтінді қайта оқып, басқа жауапты таңда. Белгіленген сөйлемдер сақталады.',
+      correct: '',
+      missing: 'Қорытынды жасауға қажет тағы бір сөйлемді тап.',
+      extra: 'Жауапты тікелей дәлелдемейтін сөйлемнің белгісін алып таста.',
+      wrong: 'Бұл туралы қай сөйлемде айтылған? Белгіні алып, басқасын таңда.',
+      empty: 'Мәтіннен жауапты дәлелдейтін сөйлемді бас.',
+    },
+  },
+};
+
+export function feedbackParts(lang: Language, r: CheckResult): FeedbackParts {
+  const p = PARTS[lang];
+  const tip = !r.answerCorrect ? p.tip.answerWrong : r.evidence === 'correct' ? null : p.tip[r.evidence];
+  // Если неверны и ответ, и цитата — сначала про ответ, затем подсказка про цитату.
+  const both = !r.answerCorrect && r.evidence !== 'correct' ? `${p.tip.answerWrong} ${p.tip[r.evidence]}` : tip;
+  return { answer: r.answerCorrect ? p.answer.yes : p.answer.no, evidence: p.evidence[r.evidence], tip: both || null };
+}
+
 // ---------- Рекомендация ----------
 
 export interface AttemptLike {

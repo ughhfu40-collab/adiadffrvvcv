@@ -51,6 +51,8 @@ test('офлайн: готовность, отключение сети, пер�
 
 test('импорт: сломанный JSON отклоняется, корректный добавляется', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByTestId('import-file')).toHaveCount(0);
+  await page.getByTestId('import-open').click();
   await page.getByTestId('import-file').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{"id": "broken",') });
   await expect(page.getByTestId('import-errors')).toContainText('Некорректный JSON');
   const lesson = { id: 'imp-test', title: 'Импортированный', language: 'ru', grade: 8,
@@ -69,6 +71,7 @@ test('импорт урока с существующим ID: старый ур�
   await page.getByText('← К урокам').click();
   await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
   const original = (await import('../../lessons/ru-saiga.json', { with: { type: 'json' } })).default;
+  await page.getByTestId('import-open').click();
   await page.getByTestId('import-file').setInputFiles({ name: 'same.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(original)) });
   await expect(page.getByTestId('import-same')).toContainText('уже есть');
   const changed = { ...original, title: 'Сайгаки (новая версия)' };
@@ -77,4 +80,107 @@ test('импорт урока с существующим ID: старый ур�
   await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Возвращение сайгаков');
   await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
   await expect(page.getByTestId('lesson-ru-saiga-v2')).toContainText('Выполнено 0 из 3');
+});
+
+test('главная → «Начать урок» одним нажатием; два отдельных итога: ответ и доказательство', async ({ page }) => {
+  await page.goto('/');
+  const start = page.getByTestId('start-lesson');
+  await expect(start).toHaveText(/Начать урок/);
+  // Кнопка видна без прокрутки (в том числе на телефоне); навыки — ниже списка уроков.
+  await expect(start).toBeInViewport();
+  const lessonsY = (await page.getByTestId('lesson-ru-saiga').boundingBox())!.y;
+  expect((await page.getByTestId('progress').boundingBox())!.y).toBeGreaterThan(lessonsY);
+  await start.click();
+  await expect(page.getByTestId('question')).toContainText('Когда у сайгаков начинается отёл?');
+
+  // Ответ неверный, доказательство верное
+  await answer(page, 'a', ['s1']);
+  await expect(page.getByTestId('feedback-answer')).toHaveText('Ответ неверный');
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Доказательство верное');
+  // Ответ верный, цитата неверная; исправление цитаты не сбрасывает выбранный ответ
+  await page.getByTestId('opt-b').check();
+  await page.getByTestId('sent-s1').click();
+  await page.getByTestId('sent-s3').click();
+  await expect(page.getByTestId('sent-s3')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback-answer')).toHaveText('Ответ верный');
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Цитата не подтверждает ответ');
+  await page.getByTestId('sent-s3').click();
+  await expect(page.getByTestId('opt-b')).toBeChecked();
+  await page.getByTestId('sent-s1').click();
+  await page.getByTestId('sent-s2').click();
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Лишнее предложение');
+  await expect(page.getByTestId('opt-b')).toBeChecked();
+  await page.getByTestId('sent-s2').click();
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback')).toHaveAttribute('data-solved', 'true');
+  await expect(page.getByTestId('feedback-answer')).toHaveText('Ответ верный');
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Доказательство верное');
+  await expect(page.getByTestId('next')).toHaveText(/Следующее задание/);
+  await page.getByTestId('next').click();
+  await answer(page, 'c', ['s4']);
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Доказательства пока не хватает');
+
+  // Следующий запуск продолжает с первого нерешённого задания
+  await page.getByText('← К урокам').click();
+  await expect(page.getByTestId('start-caption')).toContainText('задание 2 из 3');
+  await page.getByTestId('start-lesson').click();
+  await expect(page.getByTestId('question')).toContainText('охранять места отёла');
+});
+
+test('қазақша: «Сабақты бастау» открывает казахский урок, итоги на языке урока', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('ui-lang').click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Мәтінді оқы да, жауабыңды дәлелде');
+  await expect(page.getByTestId('start-lesson')).toHaveText(/Сабақты бастау/);
+  await expect(page.getByTestId('start-lesson')).toBeInViewport();
+  await page.getByTestId('start-lesson').click();
+  await expect(page.getByTestId('question')).toContainText('Балқаштың батысына');
+  await answer(page, 'a', ['s2']);
+  await expect(page.getByTestId('feedback-answer')).toHaveText('Жауап қате');
+  await expect(page.getByTestId('feedback-evidence')).toHaveText('Дәлел дұрыс');
+  await page.getByTestId('opt-b').check();
+  await page.getByTestId('check').click();
+  await expect(page.getByTestId('feedback-answer')).toHaveText('Жауап дұрыс');
+  await expect(page.getByTestId('next')).toHaveText(/Келесі тапсырма/);
+});
+
+test.describe('телефон 390×844 (касания)', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test('урок одним касанием, цитата, итоги, офлайн-перезапуск с прогрессом, ru и kk', async ({ page, context }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('offline-status')).toHaveAttribute('data-ready', 'true', { timeout: 30_000 });
+    await expect(page.getByTestId('start-lesson')).toBeInViewport();
+    await page.getByTestId('start-lesson').tap();
+    await expect(page.getByTestId('question')).toContainText('Когда у сайгаков');
+    // Подсказка, как вернуться к тексту, — прямо у вопроса
+    await expect(page.getByTestId('to-text')).toBeVisible();
+    await page.getByTestId('opt-b').tap();
+    await page.getByTestId('to-text').tap();
+    await expect(page.getByTestId('sent-s1')).toBeInViewport();
+    await page.getByTestId('sent-s1').tap();
+    await expect(page.getByTestId('sent-s1')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('to-question').tap();
+    await expect(page.getByTestId('quotes')).toContainText('Ранней весной');
+    await page.getByTestId('check').tap();
+    await expect(page.getByTestId('feedback-answer')).toHaveText('Ответ верный');
+    await expect(page.getByTestId('feedback-evidence')).toHaveText('Доказательство верное');
+    await expect(page.getByTestId('next')).toBeVisible();
+    await page.getByText('← К урокам').tap();
+
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.getByTestId('progress-find')).toContainText('1 решено');
+    await expect(page.getByTestId('lesson-ru-saiga')).toContainText('Выполнено 1 из 3');
+    await page.getByTestId('ui-lang').tap();
+    await expect(page.getByTestId('start-lesson')).toHaveText(/Сабақты бастау/);
+    await page.getByTestId('start-lesson').tap();
+    await page.getByTestId('opt-b').tap();
+    await page.getByTestId('sent-s3').tap();
+    await page.getByTestId('check').tap();
+    await expect(page.getByTestId('feedback-answer')).toHaveText('Жауап дұрыс');
+    await expect(page.getByTestId('feedback-evidence')).toHaveText('Үзінді жауапты дәлелдемейді');
+  });
 });

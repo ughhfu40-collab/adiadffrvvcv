@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isEditableDraft, qualityIssues, qualityIssueText, splitSentences, validateLesson, type Language, type Lesson, type QualityIssue, type Skill, type Task } from '../../shared/lesson';
 import { API_URL, getHealth, type Health } from './api';
 import { db } from './db';
@@ -102,37 +102,69 @@ export function Teacher() {
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   }
 
+  // Ошибки схемы, привязанные к заданию (tasks.N.…), показываются рядом с ним; остальные — у кнопки сохранения.
+  const allErrors = validation && !validation.ok ? validation.errors : [];
+  const taskOf = (e: string) => { const m = /^tasks\.(\d+)\./.exec(e); return m ? Number(m[1]) : null; };
+  const errText = (e: string) => e.replace(/^[^:]*: /, '');
+  const liveServerErrors = serverErrors.filter((e) => allErrors.includes(e));
+  const step = !draft ? 1 : canSave ? 3 : 2;
+  const steps = [t('tStep1'), t('tStep2'), t('tStep3')];
+  const go = (n: number) => document.getElementById(`t-step-${n}`)?.scrollIntoView({ block: 'start' });
+
   return (
-    <div className="space-y-4">
-      <section className="card space-y-3">
-        <h2 className="h2">{t('tText')}</h2>
+    <div className="space-y-6 pt-6 sm:pt-10">
+      <ol aria-label={t('tSteps')} className="grid grid-cols-3 gap-2 sm:gap-4" data-testid="t-steps">
+        {steps.map((label, k) => {
+          const n = k + 1;
+          const state = n < step ? 'done' : n === step ? 'current' : 'next';
+          return (
+            <li key={n}>
+              <button type="button" onClick={() => go(n)} aria-current={state === 'current' ? 'step' : undefined}
+                className={`flex h-full w-full flex-col items-start gap-1 rounded-xl border-t-4 bg-card px-3 py-2 text-left text-sm transition sm:flex-row sm:items-center sm:gap-3 sm:px-4 sm:py-3 ${state === 'next' ? 'border-line text-muted' : 'border-brand'} ${state === 'current' ? 'font-semibold shadow-sm' : ''}`}>
+                <span aria-hidden="true" className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-serif text-sm font-semibold ${state === 'next' ? 'border border-line' : 'bg-brand text-on-brand'}`}>{state === 'done' ? '✓' : n}</span>
+                <span className="leading-tight">{label}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+
+      <section id="t-step-1" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-1-title">
+        <StepTitle n={1} id="t-step-1-title">{t('tText')}</StepTitle>
         <div className="flex flex-wrap gap-2">
-          <input className="input min-w-0 flex-1" placeholder={t('tTitle')} value={title} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
+          <input className="input min-w-0 flex-1" placeholder={t('tTitle')} aria-label={t('tTitle')} value={title} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
           <select className="input" value={language} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
             <option value="ru">Русский</option><option value="kk">Қазақша</option>
           </select>
         </div>
-        <textarea className="input h-40 w-full" placeholder={t('tPaste')} value={text} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
+        <textarea className="input h-44 w-full font-serif text-[1.05rem] leading-7" placeholder={t('tPaste')} aria-label={t('tPaste')} value={text} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
         {sentences.length > 0 && (
-          <ol className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800" data-testid="t-preview">
-            {sentences.map((s) => <li key={s.id}><span className="mr-2 font-mono text-xs text-indigo-600">{s.id}</span>{s.text}</li>)}
+          <ol className="space-y-1 rounded-xl bg-paper p-3 font-serif text-[0.95rem]" data-testid="t-preview">
+            {sentences.map((s) => <li key={s.id} className="flex gap-2"><span className="mt-0.5 shrink-0 font-sans text-xs font-semibold text-brand-ink">{s.id}</span><span>{s.text}</span></li>)}
           </ol>
         )}
-        <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700" data-testid="t-health">
-          {!health ? t('tChecking') : 'error' in health ? <span className="text-rose-700 dark:text-rose-300">{health.error}</span>
-            : health.ollama.ok ? <span className="text-emerald-700 dark:text-emerald-400">{t('tReady', { model: health.ollama.model })}</span>
-            : <span className="text-amber-800 dark:text-amber-300">{health.ollama.reason}. {t('tStart')} <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{health.startCommand}</code></span>}
+        <div className="flex items-start gap-2 text-sm" data-testid="t-health">
+          <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${!health ? 'animate-pulse bg-line' : ollamaOk ? 'bg-ok' : 'bg-warn'}`} />
+          {!health ? <span className="text-muted">{t('tChecking')}</span> : 'error' in health ? <span className="text-bad">{health.error}</span>
+            : health.ollama.ok ? <span className="text-ok">{t('tReady', { model: health.ollama.model })}</span>
+            : <span className="text-warn">{health.ollama.reason}. {t('tStart')} <code className="rounded bg-paper px-1">{health.startCommand}</code></span>}
         </div>
+        <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
           <button className="btn" disabled={busy || sentences.length < 3} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
           {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
+          {busy && (
+            <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">
+              <span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+              {t('tElapsed', { time: mmss(elapsed), limit: mmss(limitSec) })}
+            </span>
+          )}
           {!busy && <button className="btn-ghost" disabled={sentences.length < 2} onClick={manualDraft}>{t('tManual')}</button>}
-          {!ollamaOk && !busy && <span className="text-xs text-slate-500">{t('tNoModel')}</span>}
+          {!ollamaOk && !busy && <span className="text-xs text-muted">{t('tNoModel')}</span>}
         </div>
-        {busy && <p className="text-sm text-slate-600 dark:text-slate-300" role="status" data-testid="t-elapsed">{t('tElapsed', { time: mmss(elapsed), limit: mmss(limitSec) })}</p>}
         {genMsg && (
           <div role="alert" data-testid={`t-msg-${genMsg.kind}`}
-            className={`rounded-lg p-3 text-sm ${genMsg.kind === 'cancelled' ? 'bg-slate-100 dark:bg-slate-800' : 'bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200'}`}>
+            className={`rounded-xl p-3 text-sm ${genMsg.kind === 'cancelled' ? 'bg-paper' : 'bg-bad-soft text-bad'}`}>
             {genMsg.kind === 'cancelled' && t('tCancelled')}
             {genMsg.kind === 'timeout' && t('tTimeout', { sec: genMsg.sec })}
             {genMsg.kind === 'unavailable' && t('tUnavailable', { reason: genMsg.reason, command: genMsg.command })}
@@ -141,58 +173,93 @@ export function Teacher() {
           </div>
         )}
         {structErrors.length > 0 && (
-          <div role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200" data-testid="t-struct-error">
+          <div role="alert" className="rounded-xl bg-bad-soft p-3 text-sm text-bad" data-testid="t-struct-error">
             <b>{t('tStructTitle')}</b> {draft ? t('tStructKept') : ''} {t('tStructRetry')}
             <ul className="list-disc pl-5">{structErrors.slice(0, 6).map((e) => <li key={e}>{e}</li>)}</ul>
           </div>
         )}
       </section>
 
-      {draft && (
-        <section className="card space-y-4" data-testid="t-draft">
-          <h2 className="h2">{t('tDraftTitle')}</h2>
-          {serverErrors.length > 0 && <div className="rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950" role="alert"><b>{t('tRefErrors')}</b><ul className="list-disc pl-5">{serverErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
-          {issues.length > 0 && (
-            <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100" role="alert" data-testid="t-quality">
-              <b>{t('tQualityTitle')}</b>
-              <ul className="list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
-            </div>
-          )}
-          <input className="input w-full" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-          {draft.tasks.map((task, i) => {
-            const taskIssues = issues.filter((q) => q.taskIndex === i);
-            return (
-              <fieldset key={`${rev}-${i}`} data-testid={`t-task-${i}`} data-issue={taskIssues.length > 0}
-                className={`min-w-0 space-y-2 rounded-lg border p-3 ${taskIssues.length ? 'border-amber-400 ring-2 ring-amber-300 dark:ring-amber-700' : 'border-slate-200 dark:border-slate-700'}`}>
-                {taskIssues.length > 0 && <ul className="text-sm text-amber-800 dark:text-amber-300" data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>⚠ {qualityIssueText(lang, q)}</li>)}</ul>}
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <select className="input max-w-full" value={task.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })}>
-                    <option value="find">{t('tSkillFind')}</option><option value="match">{t('tSkillMatch')}</option><option value="infer">{t('tSkillInfer')}</option>
-                  </select>
-                  <input className="input min-w-0 flex-1" placeholder={t('tQuestion')} value={task.question} onChange={(e) => updTask(i, { question: e.target.value })} />
-                </div>
-                {task.options.map((o, k) => (
-                  <div key={k} className="flex items-center gap-2">
-                    <input type="radio" name={`correct-${rev}-${i}`} checked={task.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title={t('tCorrect')} />
-                    <span className="font-mono text-xs">{o.id}</span>
-                    <input className="input min-w-0 flex-1" value={o.text} onChange={(e) => updTask(i, { options: task.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
+      <section id="t-step-2" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-2-title" data-testid={draft ? 't-draft' : undefined}>
+        <StepTitle n={2} id="t-step-2-title">{t('tDraftTitle')}</StepTitle>
+        {!draft ? <p className="text-sm text-muted">{t('tStep2Empty')}</p> : (
+          <>
+            {liveServerErrors.length > 0 && <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert"><b>{t('tRefErrors')}</b><ul className="list-disc pl-5">{liveServerErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
+            {issues.length > 0 && (
+              <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert" data-testid="t-quality">
+                <b>{t('tQualityTitle')}</b>
+                <ul className="list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
+              </div>
+            )}
+            <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+            {draft.tasks.map((task, i) => {
+              const taskIssues = issues.filter((q) => q.taskIndex === i);
+              const taskErrors = allErrors.filter((e) => taskOf(e) === i);
+              const flagged = taskIssues.length > 0 || taskErrors.length > 0;
+              return (
+                <fieldset key={`${rev}-${i}`} data-testid={`t-task-${i}`} data-issue={taskIssues.length > 0}
+                  className={`min-w-0 space-y-3 rounded-2xl border p-4 ${flagged ? 'border-warn/60 bg-warn-soft/40 ring-2 ring-warn/30' : 'border-line'}`}>
+                  <legend className="px-1 font-serif text-lg font-semibold">{t('tTaskN', { n: i + 1 })}</legend>
+                  {flagged && (
+                    <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert">
+                      <b>{t('tFixHere')}</b>
+                      {taskIssues.length > 0 && <ul data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>⚠ {qualityIssueText(lang, q)}</li>)}</ul>}
+                      {taskErrors.length > 0 && <ul data-testid={`t-task-err-${i}`}>{taskErrors.map((e) => <li key={e}>⚠ {errText(e)}</li>)}</ul>}
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select className="input max-w-full" value={task.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })} aria-label={t('tTaskN', { n: i + 1 })}>
+                      <option value="find">{t('tSkillFind')}</option><option value="match">{t('tSkillMatch')}</option><option value="infer">{t('tSkillInfer')}</option>
+                    </select>
+                    <input className="input min-w-0 flex-1" placeholder={t('tQuestion')} aria-label={t('tQuestion')} value={task.question} onChange={(e) => updTask(i, { question: e.target.value })} />
                   </div>
-                ))}
-                <EvidenceEditor index={i} sentences={draft.sentences} sets={task.evidenceSets} onChange={(evidenceSets) => updTask(i, { evidenceSets })} />
-                <input className="input w-full" placeholder={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
-              </fieldset>
-            );
-          })}
-          {validation && !validation.ok && <ul className="list-disc pl-5 text-sm text-rose-700 dark:text-rose-300" data-testid="t-errors">{validation.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-          <div className="flex flex-wrap gap-2">
-            <button className="btn" disabled={!canSave} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
-            <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
-            <button className="btn-ghost" onClick={() => { setDraft(null); void db.drafts.delete('current'); }}>{t('tDelete')}</button>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-muted">{t('tOptions')}</div>
+                    {task.options.map((o, k) => (
+                      <div key={k} className="flex items-center gap-2">
+                        <input type="radio" className="h-4 w-4 accent-[rgb(var(--brand))]" name={`correct-${rev}-${i}`} checked={task.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title={t('tCorrect')} aria-label={`${t('tCorrect')}: ${o.id}`} />
+                        <span className="w-4 font-mono text-xs text-muted">{o.id}</span>
+                        <input className="input min-w-0 flex-1" value={o.text} onChange={(e) => updTask(i, { options: task.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
+                      </div>
+                    ))}
+                  </div>
+                  <EvidenceEditor index={i} sentences={draft.sentences} sets={task.evidenceSets} onChange={(evidenceSets) => updTask(i, { evidenceSets })} />
+                  <input className="input w-full" placeholder={t('tHint')} aria-label={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
+                </fieldset>
+              );
+            })}
+          </>
+        )}
+      </section>
+
+      <section id="t-step-3" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-3-title">
+        <StepTitle n={3} id="t-step-3-title">{t('tStep3')}</StepTitle>
+        <p className="text-sm text-muted">{draft && !canSave ? t('tSaveBlocked') : t('tSaveLead')}</p>
+        {allErrors.length > 0 && (
+          <div className="rounded-xl bg-bad-soft p-3 text-sm text-bad">
+            <b>{t('tErrorsTitle')}</b>
+            <ul className="list-disc pl-5" data-testid="t-errors">
+              {allErrors.map((e) => { const n = taskOf(e); return <li key={e}>{n === null ? e : `${t('tTaskN', { n: n + 1 })}: ${errText(e)} (${e.split(': ')[0]})`}</li>; })}
+            </ul>
           </div>
-          {saved && <p className="text-emerald-700 dark:text-emerald-400" data-testid="t-saved">{saved}</p>}
-        </section>
-      )}
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button className="btn" disabled={!canSave} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
+          <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
+          {draft && <button className="btn-ghost text-bad" onClick={() => { setDraft(null); void db.drafts.delete('current'); }}>{t('tDelete')}</button>}
+        </div>
+        {saved && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">✓ {saved}</p>}
+      </section>
     </div>
+  );
+}
+
+function StepTitle({ n, id, children }: { n: number; id: string; children: ReactNode }) {
+  return (
+    <h2 id={id} className="flex items-center gap-3 font-serif text-2xl font-semibold tracking-tight">
+      <span aria-hidden="true" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-base text-on-brand">{n}</span>
+      {children}
+    </h2>
   );
 }
 
@@ -221,39 +288,40 @@ function EvidenceEditor({ index, sentences, sets, onChange }: { index: number; s
   };
 
   return (
-    <div className="space-y-2 rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60" data-testid={`t-ev-${index}`}>
-      <div className="text-sm font-medium">{t('tEvidence')}</div>
-      <div className="flex flex-wrap items-center gap-1" role="tablist">
+    <div className="space-y-3 rounded-xl bg-paper p-3" data-testid={`t-ev-${index}`}>
+      <div className="flex items-center gap-2 text-sm font-medium"><span aria-hidden="true" className="inline-block h-4 w-6 rounded bg-marker" />{t('tEvidence')}</div>
+      <div className="flex flex-wrap items-center gap-1.5" role="tablist">
         {safeSets.map((s, k) => (
           <span key={k} className="inline-flex items-center">
             <button type="button" role="tab" aria-selected={k === cur} data-testid={`t-ev-${index}-set-${k}`} onClick={() => setActive(k)}
-              className={`rounded-l-md px-2 py-1 text-xs ${k === cur ? 'bg-indigo-600 text-white' : 'bg-white ring-1 ring-slate-300 dark:bg-slate-900 dark:ring-slate-700'}`}>
+              className={`min-h-9 px-3 py-1 text-xs ${safeSets.length > 1 ? 'rounded-l-lg' : 'rounded-lg'} ${k === cur ? 'bg-brand font-semibold text-on-brand' : 'border border-line bg-card'}`}>
               {t('tSet', { n: k + 1 })}: {s.join(', ') || '—'}
             </button>
             {safeSets.length > 1 && (
               <button type="button" aria-label={t('tRemoveSet', { n: k + 1 })} data-testid={`t-ev-${index}-del-${k}`}
                 onClick={() => { onChange(safeSets.filter((_, j) => j !== k)); setActive(0); }}
-                className="rounded-r-md bg-white px-2 py-1 text-xs ring-1 ring-slate-300 hover:bg-rose-50 dark:bg-slate-900 dark:ring-slate-700">×</button>
+                className="min-h-9 rounded-r-lg border border-l-0 border-line bg-card px-2.5 py-1 text-xs hover:bg-bad-soft hover:text-bad">×</button>
             )}
           </span>
         ))}
-        <button type="button" className="rounded-md px-2 py-1 text-xs text-indigo-700 ring-1 ring-indigo-300 dark:text-indigo-300" data-testid={`t-ev-${index}-add`}
+        <button type="button" className="min-h-9 rounded-lg border border-dashed border-brand/50 px-3 py-1 text-xs font-medium text-brand-ink hover:bg-brand-soft" data-testid={`t-ev-${index}-add`}
           onClick={() => { onChange([...safeSets.filter((s) => s.length), []]); setActive(safeSets.filter((s) => s.length).length); }}>{t('tAddSet')}</button>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1 font-serif">
         {sentences.map((s) => {
           const on = (safeSets[cur] ?? []).includes(s.id);
           return (
             <button key={s.id} type="button" aria-pressed={on} data-testid={`t-ev-${index}-${s.id}`} onClick={() => toggle(s.id)}
-              className={`block w-full rounded px-2 py-1 text-left text-sm ${on ? 'bg-amber-200 dark:bg-amber-700/60' : 'hover:bg-white dark:hover:bg-slate-900'}`}>
-              <span className="mr-1 font-mono text-xs text-indigo-600">{s.id}</span>{s.text}
+              className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[0.95rem] transition-colors ${on ? 'bg-marker text-marker-ink' : 'hover:bg-marker/30 active:bg-marker/70'}`}>
+              <span className={`mt-0.5 inline-flex h-5 min-w-8 shrink-0 items-center justify-center rounded-full px-1 font-sans text-[11px] font-semibold ${on ? 'bg-brand text-on-brand' : 'border border-line text-muted'}`}>{on ? `✓ ${s.id}` : s.id}</span>
+              <span>{s.text}</span>
             </button>
           );
         })}
       </div>
       <details className="text-xs">
-        <summary className="cursor-pointer text-slate-500">{t('tEvidenceText')}</summary>
-        <input className="input mt-1 w-full font-mono" data-testid={`t-evidence-${index}`} value={text}
+        <summary className="cursor-pointer text-muted">{t('tEvidenceText')}</summary>
+        <input className="input mt-1 w-full font-mono" data-testid={`t-evidence-${index}`} value={text} aria-label={t('tEvidenceText')}
           onChange={(e) => { setText(e.target.value); onChange(parseEvidence(e.target.value)); }} />
       </details>
     </div>

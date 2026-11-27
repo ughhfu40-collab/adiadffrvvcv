@@ -3,10 +3,12 @@ import { Student } from './Student';
 import { Teacher } from './Teacher';
 import { seedBuiltins } from './db';
 import { setupOffline } from './offline';
-import { useI18n } from './i18n';
+import { PITCH_URL, useI18n, type UiLang } from './i18n';
 
 const STATIC_DEMO = import.meta.env.VITE_STUDENT_ONLY === 'true';
 const BUILD_SHA = (import.meta.env.VITE_BUILD_SHA as string | undefined) ?? 'dev';
+
+const LANGS: { id: UiLang; label: string }[] = [{ id: 'kk', label: 'Қазақша' }, { id: 'ru', label: 'Русский' }];
 
 export function App() {
   const { t, lang, setLang } = useI18n();
@@ -26,27 +28,45 @@ export function App() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-16">
-      <header className="z-10 -mx-4 mb-4 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:sticky sm:top-0 dark:border-slate-800 dark:bg-slate-950/90">
-        <h1 className="mr-auto text-lg font-bold">{t('appTitle')}</h1>
-        <span data-testid="offline-status" data-ready={offlineReady}
-          className={`badge ${offlineReady ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100' : ''}`}>
-          {offlineReady ? t('offlineReady') : t('offlineLoading')}
-        </span>
-        {!online && <span className="badge bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">{t('noNetwork')}</span>}
-        <button className="badge ring-1 ring-slate-300 hover:bg-slate-200 dark:ring-slate-700" data-testid="ui-lang" lang={lang === 'ru' ? 'kk' : 'ru'}
-          onClick={() => setLang(lang === 'ru' ? 'kk' : 'ru')}>{t('switchLang')}</button>
-        {!STATIC_DEMO && (
-          <nav className="flex rounded-lg bg-slate-100 p-1 text-sm dark:bg-slate-800">
-            {(['student', 'teacher'] as const).map((m) => (
-              <button key={m} onClick={() => setMode(m)} data-testid={`mode-${m}`}
-                className={`rounded-md px-3 py-1 ${mode === m ? 'bg-white shadow dark:bg-slate-700' : ''}`}>{m === 'student' ? t('modeStudent') : t('modeTeacher')}</button>
+    <div className="min-h-dvh">
+      <header className="border-b border-line">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
+          <span className="mr-auto font-serif text-[1.7rem] font-bold leading-none tracking-tight text-ink" translate="no">
+            {t('appTitle')}<span className="text-brand-ink" aria-hidden="true">.</span>
+          </span>
+          <span data-testid="offline-status" data-ready={offlineReady} role="status" title={offlineReady ? t('offlineReady') : t('offlineLoading')}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted">
+            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${offlineReady ? 'bg-ok' : 'animate-pulse bg-line'}`} />
+            <span className="max-[419px]:sr-only">{offlineReady ? t('offlineReady') : t('offlineLoading')}</span>
+          </span>
+          {!online && <span className="badge border-warn/40 bg-warn-soft text-warn">{t('noNetwork')}</span>}
+          {/* Одна кнопка-переключатель (data-testid=ui-lang): видны оба языка, активный — залит. */}
+          <button type="button" data-testid="ui-lang" aria-label={`${t('langLabel')}: ${lang === 'kk' ? 'Қазақша' : 'Русский'}`}
+            onClick={() => setLang(lang === 'ru' ? 'kk' : 'ru')}
+            className="inline-flex rounded-full border border-line bg-card p-0.5 text-sm">
+            {LANGS.map((l) => (
+              <span key={l.id} lang={l.id} className={`rounded-full px-3 py-1.5 transition ${lang === l.id ? 'bg-ink font-semibold text-paper' : 'text-muted'}`}>{l.label}</span>
             ))}
-          </nav>
-        )}
+          </button>
+          {!STATIC_DEMO && (
+            <nav aria-label={t('modeLabel')} className="order-last flex w-full rounded-full border border-line bg-card p-0.5 text-sm sm:order-none sm:w-auto">
+              {(['student', 'teacher'] as const).map((m) => (
+                <button key={m} type="button" onClick={() => setMode(m)} data-testid={`mode-${m}`} aria-current={mode === m ? 'page' : undefined}
+                  className={`flex-1 rounded-full px-4 py-1.5 transition ${mode === m ? 'bg-brand font-semibold text-on-brand' : 'text-muted hover:text-ink'}`}>
+                  {m === 'student' ? t('modeStudent') : t('modeTeacher')}
+                </button>
+              ))}
+            </nav>
+          )}
+        </div>
       </header>
-      {!ready ? <p>{t('loading')}</p> : mode === 'student' || STATIC_DEMO ? <Student /> : <Teacher />}
-      <footer className="mt-10 text-center text-xs text-slate-400" data-testid="build">{t('build', { sha: BUILD_SHA.slice(0, 7) })}</footer>
+      <main className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
+        {!ready ? <p className="py-10 text-muted">{t('loading')}</p> : mode === 'student' || STATIC_DEMO ? <Student /> : <Teacher />}
+      </main>
+      <footer className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-6 text-xs text-muted sm:px-6">
+        <a className="link" href={PITCH_URL} target="_blank" rel="noopener noreferrer">{t('pitchLink')}</a>
+        <span data-testid="build">{t('build', { sha: BUILD_SHA.slice(0, 7) })}</span>
+      </footer>
     </div>
   );
 }
