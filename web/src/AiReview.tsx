@@ -3,6 +3,7 @@ import type { Lesson, Task } from '../../shared/lesson';
 import { isEditableDraft } from '../../shared/lesson';
 import { API_URL } from './api';
 import { useI18n } from './i18n';
+import { Icon, Spinner } from './Icon';
 
 /** Ответ /api/review для одного задания (см. server/review.ts). */
 export interface TaskReview {
@@ -113,23 +114,26 @@ export function AiReviewBar({ ai, lesson, canRun }: { ai: AiReviewState; lesson:
   const { t } = useI18n();
   const flagged = Object.values(ai.byTask).filter((e) => !e.review.ok).length;
   return (
-    <div className="rounded-xl border border-line p-3 text-sm" data-testid="t-ai-bar" aria-live="polite">
-      <div className="flex flex-wrap items-center gap-2">
-        <b>{t('aiTitle')}</b>
+    <div className="rounded-control border border-line-strong/50 bg-card p-4 text-sm" data-testid="t-ai-bar" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-chip bg-brand-soft text-brand-ink" aria-hidden="true"><Icon name="search" className="h-[1.125rem] w-[1.125rem]" /></span>
+        <b className="mr-auto text-base">{t('aiTitle')}</b>
         {ai.status.kind === 'running'
           ? <>
-              <span data-testid="t-ai-running">{t('aiRunning', { time: mmss(ai.elapsed) })}</span>
-              <button type="button" className="btn-ghost" onClick={ai.cancel} data-testid="t-ai-cancel">{t('tCancel')}</button>
+              <span className="inline-flex items-center gap-2 tabular-nums text-muted" data-testid="t-ai-running"><Spinner />{t('aiRunning', { time: mmss(ai.elapsed) })}</span>
+              <button type="button" className="btn-ghost btn-sm" onClick={ai.cancel} data-testid="t-ai-cancel"><Icon name="x" className="h-4 w-4" />{t('tCancel')}</button>
             </>
-          : <button type="button" className="btn-ghost" disabled={!canRun || !lesson} onClick={() => lesson && void ai.run(lesson)} data-testid="t-ai-run">
+          : <button type="button" className="btn-ghost btn-sm" disabled={!canRun || !lesson} onClick={() => lesson && void ai.run(lesson)} data-testid="t-ai-run">
               {ai.status.kind === 'done' ? t('aiRerun') : t('aiRun')}
             </button>}
       </div>
       {ai.status.kind === 'done' && (
-        <p className="mt-2" data-testid="t-ai-summary">{flagged ? t('aiSummaryFlagged', { n: flagged }) : t('aiSummaryClean')}</p>
+        <p className={`note mt-3 ${flagged ? 'note-warn' : 'note-ok'}`} data-testid="t-ai-summary">
+          <Icon name={flagged ? 'alert' : 'check'} className="mt-px h-5 w-5" /><span>{flagged ? t('aiSummaryFlagged', { n: flagged }) : t('aiSummaryClean')}</span>
+        </p>
       )}
-      {ai.status.kind === 'error' && <p className="mt-2 text-bad" role="alert" data-testid="t-ai-error">{t('aiError', { reason: ai.status.reason })}</p>}
-      <p className="mt-2 text-xs text-muted">{t('aiNote')}</p>
+      {ai.status.kind === 'error' && <p className="note note-bad mt-3" role="alert" data-testid="t-ai-error"><Icon name="alert" className="mt-px h-5 w-5" /><span>{t('aiError', { reason: ai.status.reason })}</span></p>}
+      <p className="mt-3 text-caption text-muted">{t('aiNote')}</p>
     </div>
   );
 }
@@ -144,16 +148,20 @@ export function AiTaskNote({ ai, lesson, task, index, onReplace }: { ai: AiRevie
   const r = entry.review;
   const checks: [string, boolean][] = [[t('aiCheckAnswer'), r.answerFromText], [t('aiCheckOne'), r.onlyOneCorrect], [t('aiCheckEvidence'), r.evidenceOk], [t('aiCheckLanguage'), r.languageOk]];
   return (
-    <div className={`rounded-xl p-3 text-sm ${r.ok && !entry.repaired ? 'bg-ok-soft text-ok' : 'border border-warn/40 bg-warn-soft/50'}`} data-testid={`t-ai-${index}`} data-ok={r.ok} data-stale={stale}>
-      {entry.repaired && <p data-testid={`t-ai-fixed-${index}`}><b>✎ {t(r.ok ? 'aiFixedClean' : 'aiFixedStill')}</b></p>}
-      {r.ok ? <p>✓ {t('aiOk')}</p>
+    <div className={`rounded-control p-3 text-sm ${r.ok && !entry.repaired ? 'bg-ok-soft text-ok' : 'border border-warn/50 bg-warn-soft/60 text-ink'}`} data-testid={`t-ai-${index}`} data-ok={r.ok} data-stale={stale}>
+      {entry.repaired && <p className="mb-2 flex items-start gap-2" data-testid={`t-ai-fixed-${index}`}><Icon name="pencil" className="mt-px h-4 w-4" /><b>{t(r.ok ? 'aiFixedClean' : 'aiFixedStill')}</b></p>}
+      {r.ok ? <p className="flex items-center gap-2"><Icon name="check" className="h-4 w-4" />{t('aiOk')}</p>
         : <>
-            <p><b>{t('aiProblems')}</b></p>
-            <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {checks.map(([label, ok]) => <li key={label}>{ok ? '✓' : '✗'} {label}</li>)}
+            <p className="flex items-center gap-2 text-warn"><Icon name="alert" className="h-4 w-4" /><b>{t('aiProblems')}</b></p>
+            <ul className="mt-2 flex flex-wrap gap-1.5 text-caption">
+              {checks.map(([label, ok]) => (
+                <li key={label} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${ok ? 'border-ok/40 text-ok' : 'border-bad/50 bg-bad-soft text-bad'}`}>
+                  <Icon name={ok ? 'check' : 'x'} className="h-3.5 w-3.5" />{label}
+                </li>
+              ))}
             </ul>
-            {r.problems.length > 0 && <ul className="mt-2 list-disc pl-5" data-testid={`t-ai-problems-${index}`}>{r.problems.map((p, k) => <li key={k}>{p}</li>)}</ul>}
-            <button type="button" className="btn-ghost mt-2" disabled={!!ai.repairing || !lesson}
+            {r.problems.length > 0 && <ul className="mt-2 list-disc space-y-0.5 pl-5" data-testid={`t-ai-problems-${index}`}>{r.problems.map((p, k) => <li key={k}>{p}</li>)}</ul>}
+            <button type="button" className="btn-ghost btn-sm mt-3" disabled={!!ai.repairing || !lesson}
               onClick={async () => {
                 if (!lesson) return;
                 const fixed = await ai.repair(lesson, task.id);
@@ -163,11 +171,11 @@ export function AiTaskNote({ ai, lesson, task, index, onReplace }: { ai: AiRevie
                 void ai.run({ ...lesson, tasks: lesson.tasks.map((x) => (x.id === task.id ? fixed : x)) }, task.id);
               }}
               data-testid={`t-ai-fix-${index}`}>
-              {ai.repairing === task.id ? t('aiFixing', { time: mmss(ai.elapsed) }) : t('aiFix')}
+              {ai.repairing === task.id ? <><Spinner /><span className="tabular-nums">{t('aiFixing', { time: mmss(ai.elapsed) })}</span></> : <><Icon name="pencil" className="h-4 w-4" />{t('aiFix')}</>}
             </button>
           </>}
-      {stale && <p className="mt-2 text-xs text-muted" data-testid={`t-ai-stale-${index}`}>{t('aiStale')}</p>}
-      {msg && !msg.ok && <p className="mt-2 text-bad" role="alert" data-testid={`t-ai-fix-error-${index}`}>{t('aiFixFailed', { errors: msg.text })}</p>}
+      {stale && <p className="mt-2 flex items-center gap-1.5 text-caption text-muted" data-testid={`t-ai-stale-${index}`}><Icon name="info" className="h-3.5 w-3.5" />{t('aiStale')}</p>}
+      {msg && !msg.ok && <p className="note note-bad mt-2" role="alert" data-testid={`t-ai-fix-error-${index}`}><Icon name="alert" className="mt-px h-4 w-4" /><span>{t('aiFixFailed', { errors: msg.text })}</span></p>}
     </div>
   );
 }

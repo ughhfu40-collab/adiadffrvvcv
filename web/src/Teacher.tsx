@@ -4,6 +4,7 @@ import { API_URL, getHealth, readGenerateResponse, type Health } from './api';
 import { db, draftRevision, persistDraft, saveTeacherLesson, type DraftSource } from './db';
 import { useI18n } from './i18n';
 import { AiReviewBar, AiTaskNote, useAiReview } from './AiReview';
+import { Icon, Spinner } from './Icon';
 
 const emptyTask = (n: number, skill: Skill): Task => ({ id: `t${n}`, skill, question: '', options: [{ id: 'a', text: '' }, { id: 'b', text: '' }, { id: 'c', text: '' }], correctOptionId: 'a', evidenceSets: [[]], hint: '' });
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -223,103 +224,142 @@ export function Teacher() {
 
   return (
     <div className="space-y-6 pt-6 sm:pt-10">
-      <ol aria-label={t('tSteps')} className="grid grid-cols-3 gap-2 sm:gap-4" data-testid="t-steps">
+      <div>
+        <p className="kicker">{t('tKicker')}</p>
+        <h1 className="mt-2 font-serif text-title font-semibold">{t('tHeading')}</h1>
+      </div>
+      <ol aria-label={t('tSteps')} className="grid gap-2 sm:grid-cols-3 sm:gap-3" data-testid="t-steps">
         {steps.map((label, k) => {
           const n = k + 1;
           const state = n < step ? 'done' : n === step ? 'current' : 'next';
           return (
             <li key={n}>
               <button type="button" onClick={() => go(n)} aria-current={state === 'current' ? 'step' : undefined}
-                className={`flex h-full w-full flex-col items-start gap-1 rounded-xl border-t-4 bg-card px-3 py-2 text-left text-sm transition sm:flex-row sm:items-center sm:gap-3 sm:px-4 sm:py-3 ${state === 'next' ? 'border-line text-muted' : 'border-brand'} ${state === 'current' ? 'font-semibold shadow-sm' : ''}`}>
-                <span aria-hidden="true" className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-serif text-sm font-semibold ${state === 'next' ? 'border border-line' : 'bg-brand text-on-brand'}`}>{state === 'done' ? '✓' : n}</span>
+                className={`flex h-full min-h-11 w-full items-center gap-3 rounded-control border bg-card px-3 py-2 text-left text-sm transition-colors duration-150 hover:border-brand-ink/60 sm:px-4 sm:py-3 ${state === 'current' ? 'border-brand-ink font-semibold text-ink shadow-card ring-1 ring-brand-ink' : state === 'done' ? 'border-line text-ink' : 'border-line text-muted'}`}>
+                <span aria-hidden="true" className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${state === 'next' ? 'border border-line-strong/60' : state === 'done' ? 'bg-ok text-card' : 'bg-brand text-on-brand'}`}>
+                  {state === 'done' ? <Icon name="check" className="h-4 w-4" /> : n}
+                </span>
                 <span className="leading-tight">{label}</span>
               </button>
             </li>
           );
         })}
       </ol>
-      {storageIssue && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-draft-storage-error">
-        {t(storageIssue === 'conflict' ? 'tDraftConflict' : 'tDraftStorageError')}
+      {storageIssue && <p className="note note-bad" role="alert" data-testid="t-draft-storage-error">
+        <Icon name="alert" className="mt-px h-5 w-5" /><span>{t(storageIssue === 'conflict' ? 'tDraftConflict' : 'tDraftStorageError')}</span>
       </p>}
 
-      <section id="t-step-1" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-1-title">
+      <section id="t-step-1" className="card scroll-mt-4 space-y-5 p-5 sm:p-7" aria-labelledby="t-step-1-title">
         <StepTitle n={1} id="t-step-1-title">{t('tText')}</StepTitle>
-        <div className="flex flex-wrap gap-2">
-          <input className="input min-w-0 flex-1" placeholder={t('tTitle')} aria-label={t('tTitle')} value={title} disabled={loadingDraft} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
-          <select className="input" value={language} disabled={loadingDraft} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
-            <option value="ru">Русский</option><option value="kk">Қазақша</option>
-          </select>
-          <select className="input" aria-label={t('gradeLabel')} value={grade} disabled={loadingDraft}
-            onChange={(e) => setGrade(GradeSchema.parse(Number(e.target.value)))} data-testid="t-grade">
-            {GRADES.map((g) => <option key={g} value={g}>{t('grade', { g })}</option>)}
-          </select>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <label className="min-w-0">
+            <span className="field-label">{t('tTitle')}</span>
+            <input className="input w-full" placeholder={t('tTitlePh')} value={title} disabled={loadingDraft} onChange={(e) => setTitle(e.target.value)} data-testid="t-title" />
+          </label>
+          <label>
+            <span className="field-label">{t('tLangLabel')}</span>
+            <select className="input w-full" value={language} disabled={loadingDraft} onChange={(e) => setLanguage(e.target.value as Language)} data-testid="t-lang">
+              <option value="ru">Русский</option><option value="kk">Қазақша</option>
+            </select>
+          </label>
+          <label>
+            <span className="field-label">{t('gradeLabel')}</span>
+            <select className="input w-full" value={grade} disabled={loadingDraft}
+              onChange={(e) => setGrade(GradeSchema.parse(Number(e.target.value)))} data-testid="t-grade">
+              {GRADES.map((g) => <option key={g} value={g}>{t('grade', { g })}</option>)}
+            </select>
+          </label>
         </div>
-        <textarea className="input h-44 w-full font-serif text-[1.05rem] leading-7" placeholder={t('tPaste')} aria-label={t('tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" />
+        <label className="block">
+          <span className="field-label">{t('tTextLabel')}</span>
+          <textarea className="input h-44 w-full font-serif text-[1.0625rem] leading-7" placeholder={t('tPaste')} value={text} disabled={loadingDraft} onChange={(e) => setText(e.target.value)} data-testid="t-text" aria-describedby="t-text-count" />
+          <span id="t-text-count" className={`mt-1 block text-caption tabular-nums ${tooLong ? 'text-warn' : 'text-muted'}`}>{t('tCount', { n: sentences.length, max: MAX_SENTENCES, chars: text.trim().length, maxChars: MAX_TEXT_CHARS })}</span>
+        </label>
         {sentences.length > 0 && (
-          <ol className="space-y-1 rounded-xl bg-paper p-3 font-serif text-[0.95rem]" data-testid="t-preview">
-            {sentences.map((s) => <li key={s.id} className="flex gap-2"><span className="mt-0.5 shrink-0 font-sans text-xs font-semibold text-brand-ink">{s.id}</span><span>{s.text}</span></li>)}
-          </ol>
+          <div className="panel">
+            <p className="mb-2 text-sm font-medium text-muted">{t('tPreviewTitle')}</p>
+            <ol className="space-y-1.5 font-serif text-[0.95rem]" data-testid="t-preview">
+              {sentences.map((s) => <li key={s.id} className="flex gap-2.5"><span className="mt-0.5 w-6 shrink-0 font-sans text-xs font-semibold tabular-nums text-brand-ink">{s.id}</span><span className="wrap-any">{s.text}</span></li>)}
+            </ol>
+          </div>
         )}
         <div className="flex items-start gap-2 text-sm" data-testid="t-health">
-          <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${!health ? 'animate-pulse bg-line' : ollamaOk ? 'bg-ok' : 'bg-warn'}`} />
+          {!health ? <Spinner className="mt-0.5 h-4 w-4 text-muted" /> : ollamaOk ? <Icon name="check" className="h-5 w-5 text-ok" /> : <Icon name="alert" className="h-5 w-5 text-warn" />}
           {!health ? <span className="text-muted">{t('tChecking')}</span> : 'error' in health ? <span className="text-bad">{health.error}</span>
             : health.ollama.ok ? <span className="text-ok">{t('tReady', { model: health.ollama.model })}</span>
-            : <span className="text-warn">{health.ollama.reason}. {t('tStart')} <code className="rounded bg-paper px-1">{health.startCommand}</code></span>}
+            : <span className="text-warn">{health.ollama.reason}. {t('tStart')} <code className="rounded-chip bg-sunken px-1.5 py-0.5 text-ink">{health.startCommand}</code></span>}
         </div>
         <p className="text-sm text-muted">{t('tGenerateLead')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn" disabled={loadingDraft || busy || !hasEnoughReadingText(sentences) || tooLong} onClick={() => void generate()} data-testid="t-generate">{busy ? t('tGenerating') : t('tGenerate')}</button>
-          {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel">{t('tCancel')}</button>}
-          {busy && (
-            <span className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-muted" role="status" data-testid="t-elapsed">
-              <span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-              {t('tElapsed', { time: mmss(elapsed), limit: mmss(limitSec) })}
-            </span>
-          )}
+          <button className="btn" disabled={loadingDraft || busy || !hasEnoughReadingText(sentences) || tooLong} onClick={() => void generate()} data-testid="t-generate">{busy && <Spinner />}{busy ? t('tGenerating') : t('tGenerate')}</button>
+          {busy && <button className="btn-ghost" onClick={() => abortRef.current?.abort()} data-testid="t-cancel"><Icon name="x" className="h-4 w-4" />{t('tCancel')}</button>}
           {!busy && <button className="btn-ghost" disabled={loadingDraft || sentences.length < 2} onClick={manualDraft}>{t('tManual')}</button>}
-          {!ollamaOk && !busy && <span className="text-xs text-muted">{t('tNoModel')}</span>}
-          {tooLong && <span className="text-xs text-warn" role="status" data-testid="t-too-long">{t('tTooLong', { chars: MAX_TEXT_CHARS, n: MAX_SENTENCES })}</span>}
         </div>
+        {busy && (
+          <p className="flex items-center gap-2 rounded-control bg-sunken px-3 py-2 text-sm text-muted" role="status" data-testid="t-elapsed">
+            <Icon name="clock" className="h-4 w-4" /><span className="tabular-nums">{t('tElapsed', { time: mmss(elapsed), limit: mmss(limitSec) })}</span>
+          </p>
+        )}
+        {!ollamaOk && !busy && <p className="text-caption text-muted">{t('tNoModel')}</p>}
+        {tooLong && <p className="note note-warn" role="status" data-testid="t-too-long"><Icon name="alert" className="mt-px h-5 w-5" /><span>{t('tTooLong', { chars: MAX_TEXT_CHARS, n: MAX_SENTENCES })}</span></p>}
         {genMsg && (
-          <div role="alert" data-testid={`t-msg-${genMsg.kind}`}
-            className={`rounded-xl p-3 text-sm ${genMsg.kind === 'cancelled' ? 'bg-paper' : 'bg-bad-soft text-bad'}`}>
-            {genMsg.kind === 'cancelled' && t('tCancelled')}
-            {genMsg.kind === 'timeout' && t('tTimeout', { sec: genMsg.sec })}
-            {genMsg.kind === 'unavailable' && t('tUnavailable', { reason: genMsg.reason, command: genMsg.command })}
-            {genMsg.kind === 'server-down' && t('tServerDown', { reason: genMsg.reason })}
-            {genMsg.kind === 'input' && t('tInputRejected', { errors: genMsg.errors.join('; ') })}
+          <div role="alert" data-testid={`t-msg-${genMsg.kind}`} className={`note ${genMsg.kind === 'cancelled' ? 'note-info' : 'note-bad'}`}>
+            <Icon name={genMsg.kind === 'cancelled' ? 'info' : 'alert'} className="mt-px h-5 w-5" />
+            <span>
+              {genMsg.kind === 'cancelled' && t('tCancelled')}
+              {genMsg.kind === 'timeout' && t('tTimeout', { sec: genMsg.sec })}
+              {genMsg.kind === 'unavailable' && t('tUnavailable', { reason: genMsg.reason, command: genMsg.command })}
+              {genMsg.kind === 'server-down' && t('tServerDown', { reason: genMsg.reason })}
+              {genMsg.kind === 'input' && t('tInputRejected', { errors: genMsg.errors.join('; ') })}
+            </span>
           </div>
         )}
         {structErrors.length > 0 && (
-          <div role="alert" className="rounded-xl bg-bad-soft p-3 text-sm text-bad" data-testid="t-struct-error">
-            <b>{t('tStructTitle')}</b> {draft ? t('tStructKept') : ''} {t('tStructRetry')}
-            <ul className="list-disc pl-5">{structErrors.slice(0, 6).map((e) => <li key={e}>{e}</li>)}</ul>
+          <div role="alert" className="note note-bad" data-testid="t-struct-error">
+            <Icon name="alert" className="mt-px h-5 w-5" />
+            <div className="min-w-0">
+              <b>{t('tStructTitle')}</b> {draft ? t('tStructKept') : ''} {t('tStructRetry')}
+              <ul className="mt-1 list-disc pl-5">{structErrors.slice(0, 6).map((e) => <li key={e}>{e}</li>)}</ul>
+            </div>
           </div>
         )}
         {pendingGeneration && (
-          <div className="space-y-2 rounded-xl bg-warn-soft p-3 text-sm text-warn">
-            <p role="status">{t('tPendingGeneration')}</p>
-            <button type="button" className="btn-ghost" disabled={busy} data-testid="t-open-generated"
+          <div className="note note-warn flex-col items-stretch">
+            <p role="status" className="flex items-start gap-2.5"><Icon name="info" className="mt-px h-5 w-5" /><span>{t('tPendingGeneration')}</span></p>
+            <button type="button" className="btn-ghost self-start" disabled={busy} data-testid="t-open-generated"
               onClick={() => openGeneration(pendingGeneration)}>{t('tOpenGenerated')}</button>
           </div>
         )}
       </section>
 
-      <section id="t-step-2" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-2-title" data-testid={draft ? 't-draft' : undefined}>
+      <section id="t-step-2" className="card scroll-mt-4 space-y-5 p-5 sm:p-7" aria-labelledby="t-step-2-title" data-testid={draft ? 't-draft' : undefined}>
         <StepTitle n={2} id="t-step-2-title">{t('tDraftTitle')}</StepTitle>
-        <p className="rounded-xl border-l-4 border-brand bg-brand-soft/60 p-3 text-sm" data-testid="t-autocheck">{t('tAutoCheck')}</p>
-        {!draft ? <p className="text-sm text-muted">{t('tStep2Empty')}</p> : (
+        <p className="note note-info" data-testid="t-autocheck"><Icon name="info" className="mt-px h-5 w-5 text-brand-ink" /><span>{t('tAutoCheck')}</span></p>
+        {!draft ? (
+          <div className="rounded-control border border-dashed border-line-strong/60 p-5 text-sm text-muted">
+            <p>{t('tStep2Empty')}</p>
+            <button type="button" className="btn-ghost btn-sm mt-3" onClick={() => go(1)}><Icon name="arrow-up" className="h-4 w-4" />{t('tGoStep1')}</button>
+          </div>
+        ) : (
           <>
-            {liveServerErrors.length > 0 && <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert"><b>{t('tRefErrors')}</b><ul className="list-disc pl-5">{liveServerErrors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
+            {liveServerErrors.length > 0 && <div className="note note-warn" role="alert"><Icon name="alert" className="mt-px h-5 w-5" /><div className="min-w-0"><b>{t('tRefErrors')}</b><ul className="mt-1 list-disc pl-5">{liveServerErrors.map((e) => <li key={e}>{e}</li>)}</ul></div></div>}
             {issues.length > 0 && (
-              <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert" data-testid="t-quality">
-                <b>{t('tQualityTitle')}</b>
-                <ul className="list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
+              <div className="note note-warn" role="alert" data-testid="t-quality">
+                <Icon name="alert" className="mt-px h-5 w-5" />
+                <div className="min-w-0">
+                  <b>{t('tQualityTitle')}</b>
+                  <ul className="mt-1 list-disc pl-5">{issues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>
+                </div>
               </div>
             )}
-            <p className="text-sm text-muted" data-testid="t-draft-grade">{t('grade', { g: draft.grade })}</p>
             <AiReviewBar ai={ai} lesson={validation?.ok ? validation.lesson : null} canRun={!!ollamaOk && !busy} />
-            <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => updateDraft({ ...draft, title: e.target.value })} />
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="min-w-0 flex-1">
+                <span className="field-label">{t('tTitle')}</span>
+                <input className="input w-full font-serif text-lg font-semibold" aria-label={t('tTitle')} value={draft.title} onChange={(e) => updateDraft({ ...draft, title: e.target.value })} />
+              </label>
+              <span className="badge mb-2.5" data-testid="t-draft-grade">{t('grade', { g: draft.grade })}</span>
+            </div>
             {draft.tasks.map((task, i) => {
               const taskIssues = issues.filter((q) => q.taskIndex === i);
               const taskWarnings = warnings.filter((w) => w.taskIndex === i);
@@ -329,13 +369,19 @@ export function Teacher() {
               const flagged = taskIssues.length > 0 || taskErrors.length > 0;
               return (
                 <fieldset key={`${rev}-${i}`} data-testid={`t-task-${i}`} data-issue={taskIssues.length > 0}
-                  className={`min-w-0 space-y-3 rounded-2xl border p-4 ${flagged ? 'border-warn/60 bg-warn-soft/40 ring-2 ring-warn/30' : 'border-line'}`}>
-                  <legend className="px-1 font-serif text-lg font-semibold">{t('tTaskN', { n: i + 1 })}</legend>
+                  className={`min-w-0 space-y-4 rounded-card border p-4 sm:p-5 ${flagged ? 'border-warn bg-warn-soft/30' : 'border-line-strong/40'}`}>
+                  <legend className="flex items-center gap-2 px-1.5 font-serif text-subheading font-semibold">
+                    {t('tTaskN', { n: i + 1 })}
+                    {flagged && <span className="badge border-warn/50 bg-warn-soft font-sans text-warn"><Icon name="alert" className="h-3.5 w-3.5" />{t('tNeedsFix')}</span>}
+                  </legend>
                   {flagged && (
-                    <div className="rounded-xl bg-warn-soft p-3 text-sm text-warn" role="alert">
-                      <b>{t('tFixHere')}</b>
-                      {taskIssues.length > 0 && <ul data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>⚠ {qualityIssueText(lang, q)}</li>)}</ul>}
-                      {taskErrors.length > 0 && <ul data-testid={`t-task-err-${i}`}>{taskErrors.map((e) => <li key={e}>⚠ {errText(e)}</li>)}</ul>}
+                    <div className="note note-warn" role="alert">
+                      <Icon name="alert" className="mt-px h-5 w-5" />
+                      <div className="min-w-0">
+                        <b>{t('tFixHere')}</b>
+                        {taskIssues.length > 0 && <ul className="mt-1 list-disc pl-5" data-testid={`t-task-issue-${i}`}>{taskIssues.map((q, k) => <li key={k}>{qualityIssueText(lang, q)}</li>)}</ul>}
+                        {taskErrors.length > 0 && <ul className="mt-1 list-disc pl-5" data-testid={`t-task-err-${i}`}>{taskErrors.map((e) => <li key={e}>{errText(e)}</li>)}</ul>}
+                      </div>
                     </div>
                   )}
                   {(duplicateTask || duplicateOptions) && (
@@ -345,61 +391,74 @@ export function Teacher() {
                   <AiTaskNote ai={ai} lesson={validation?.ok ? validation.lesson : null} task={task} index={i}
                     onReplace={(fixed) => { updTask(i, fixed); setRev((r) => r + 1); }} />
                   {taskWarnings.length > 0 && (
-                    <p className="rounded-xl border border-warn/40 p-3 text-sm text-warn" data-testid={`t-task-warn-${i}`}>
-                      {taskWarnings.map((w) => `💡 ${qualityWarningText(lang, w)}`).join(' ')}
+                    <p className="note border border-warn/40 text-warn" data-testid={`t-task-warn-${i}`}>
+                      <Icon name="bulb" className="mt-px h-5 w-5" /><span>{taskWarnings.map((w) => qualityWarningText(lang, w)).join(' ')}</span>
                     </p>
                   )}
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <select className="input max-w-full" value={task.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })} aria-label={t('tTaskN', { n: i + 1 })}>
-                      <option value="find">{t('tSkillFind')}</option><option value="match">{t('tSkillMatch')}</option><option value="infer">{t('tSkillInfer')}</option>
-                    </select>
-                    <input className="input min-w-0 flex-1" placeholder={t('tQuestion')} aria-label={t('tQuestion')} value={task.question} onChange={(e) => updTask(i, { question: e.target.value })} />
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+                    <label className="min-w-0">
+                      <span className="field-label">{t('tSkillLabel')}</span>
+                      <select className="input w-full" value={task.skill} onChange={(e) => updTask(i, { skill: e.target.value as Skill })}>
+                        <option value="find">{t('tSkillFind')}</option><option value="match">{t('tSkillMatch')}</option><option value="infer">{t('tSkillInfer')}</option>
+                      </select>
+                    </label>
+                    <label className="min-w-0">
+                      <span className="field-label">{t('tQuestion')}</span>
+                      <input className="input w-full" placeholder={t('tQuestionPh')} aria-label={t('tQuestion')} value={task.question} onChange={(e) => updTask(i, { question: e.target.value })} />
+                    </label>
                   </div>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium text-muted">{t('tOptions')}</div>
+                  <fieldset className="min-w-0 space-y-2">
+                    <legend className="field-label">{t('tOptions')}</legend>
                     {task.options.map((o, k) => (
-                      <div key={k} className="flex items-center gap-2">
-                        <input type="radio" className="h-4 w-4 accent-[rgb(var(--brand))]" name={`correct-${rev}-${i}`} checked={task.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title={t('tCorrect')} aria-label={`${t('tCorrect')}: ${o.id}`} />
-                        <span className="w-4 font-mono text-xs text-muted">{o.id}</span>
+                      <div key={k} className={`flex items-center gap-2 rounded-control border p-1.5 pl-3 ${task.correctOptionId === o.id ? 'border-ok/60 bg-ok-soft/60' : 'border-transparent'}`}>
+                        <input type="radio" className="h-4 w-4 shrink-0 accent-[rgb(var(--ok))]" name={`correct-${rev}-${i}`} checked={task.correctOptionId === o.id} onChange={() => updTask(i, { correctOptionId: o.id })} title={t('tCorrect')} aria-label={`${t('tCorrect')}: ${o.id}`} />
+                        <span className="w-4 text-center text-sm font-semibold text-muted" aria-hidden="true">{o.id}</span>
                         <input className="input min-w-0 flex-1" aria-label={t('tOption', { id: o.id })} value={o.text} onChange={(e) => updTask(i, { options: task.options.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} />
+                        {task.correctOptionId === o.id && <span className="hidden whitespace-nowrap pr-1 text-caption font-semibold text-ok sm:inline-flex sm:items-center sm:gap-1"><Icon name="check" className="h-3.5 w-3.5" />{t('tCorrectShort')}</span>}
                       </div>
                     ))}
-                  </div>
+                  </fieldset>
                   <EvidenceEditor index={i} sentences={draft.sentences} sets={task.evidenceSets} onChange={(evidenceSets) => updTask(i, { evidenceSets })} />
-                  <input className="input w-full" placeholder={t('tHint')} aria-label={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
+                  <label className="block">
+                    <span className="field-label">{t('tHint')}</span>
+                    <input className="input w-full" placeholder={t('tHintPh')} aria-label={t('tHint')} value={task.hint} onChange={(e) => updTask(i, { hint: e.target.value })} />
+                  </label>
                   {draft.tasks.length > 1 && (
-                    <button type="button" className="btn-ghost text-bad" data-testid={`t-remove-task-${i}`}
-                      onClick={() => loadDraft({ ...draft, tasks: draft.tasks.filter((_, index) => index !== i) })}>{t('tRemoveTask')}</button>
+                    <button type="button" className="btn-ghost btn-sm btn-danger" data-testid={`t-remove-task-${i}`}
+                      onClick={() => loadDraft({ ...draft, tasks: draft.tasks.filter((_, index) => index !== i) })}><Icon name="trash" className="h-4 w-4" />{t('tRemoveTask')}</button>
                   )}
                 </fieldset>
               );
             })}
             {missingSkill && draft.tasks.length < 3 && (
-              <button type="button" className="btn-ghost" data-testid="t-add-task" onClick={addMissingTask}>{t('tAddTask')}</button>
+              <button type="button" className="btn-ghost" data-testid="t-add-task" onClick={addMissingTask}><Icon name="plus" className="h-4 w-4" />{t('tAddTask')}</button>
             )}
           </>
         )}
       </section>
 
-      <section id="t-step-3" className="card scroll-mt-4 space-y-4 p-5 sm:p-7" aria-labelledby="t-step-3-title">
+      <section id="t-step-3" className="card scroll-mt-4 space-y-5 p-5 sm:p-7" aria-labelledby="t-step-3-title">
         <StepTitle n={3} id="t-step-3-title">{t('tStep3')}</StepTitle>
         <p className="text-sm text-muted">{draft && !canSave ? t('tSaveBlocked') : t('tSaveLead')}</p>
         {allErrors.length > 0 && (
-          <div className="rounded-xl bg-bad-soft p-3 text-sm text-bad">
-            <b>{t('tErrorsTitle')}</b>
-            <ul className="list-disc pl-5" data-testid="t-errors">
-              {allErrors.map((e) => { const n = taskOf(e); return <li key={e}>{n === null ? e : `${t('tTaskN', { n: n + 1 })}: ${errText(e)} (${e.split(': ')[0]})`}</li>; })}
-            </ul>
+          <div className="note note-bad">
+            <Icon name="alert" className="mt-px h-5 w-5" />
+            <div className="min-w-0">
+              <b>{t('tErrorsTitle')}</b>
+              <ul className="mt-1 list-disc pl-5" data-testid="t-errors">
+                {allErrors.map((e) => { const n = taskOf(e); return <li key={e}>{n === null ? e : `${t('tTaskN', { n: n + 1 })}: ${errText(e)} (${e.split(': ')[0]})`}</li>; })}
+              </ul>
+            </div>
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <button className="btn" disabled={!canSave || saving} onClick={() => void save()} data-testid="t-save">{t('tSave')}</button>
-          <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export">{t('tExport')}</button>
-          {draft && <button className="btn-ghost text-bad" disabled={saving} onClick={() => updateDraft(null)}>{t('tDelete')}</button>}
+          <button className="btn" disabled={!canSave || saving} onClick={() => void save()} data-testid="t-save">{saving && <Spinner />}{t('tSave')}</button>
+          <button className="btn-ghost" disabled={!canSave} onClick={exportJson} data-testid="t-export"><Icon name="download" className="h-4 w-4" />{t('tExport')}</button>
+          {draft && <button className="btn-ghost btn-danger sm:ml-auto" disabled={saving} onClick={() => updateDraft(null)}><Icon name="trash" className="h-4 w-4" />{t('tDelete')}</button>}
         </div>
-        {saveStatus?.draft === draft && saveStatus.kind === 'error' && <p className="rounded-xl bg-bad-soft p-3 text-bad" role="alert" data-testid="t-save-error">{t('tSaveError')}</p>}
-        {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="rounded-xl bg-ok-soft p-3 text-ok" role="status" data-testid="t-saved">
-          ✓ {saveStatus.lesson.id === draft.id ? t('tSaved') : t('tSavedVersion', { title: saveStatus.lesson.title })}
+        {saveStatus?.draft === draft && saveStatus.kind === 'error' && <p className="note note-bad" role="alert" data-testid="t-save-error"><Icon name="alert" className="mt-px h-5 w-5" /><span>{t('tSaveError')}</span></p>}
+        {saveStatus?.draft === draft && saveStatus.kind === 'saved' && <p className="note note-ok" role="status" data-testid="t-saved">
+          <Icon name="check" className="mt-px h-5 w-5" /><span>{saveStatus.lesson.id === draft.id ? t('tSaved') : t('tSavedVersion', { title: saveStatus.lesson.title })}</span>
         </p>}
       </section>
     </div>
@@ -408,8 +467,8 @@ export function Teacher() {
 
 function StepTitle({ n, id, children }: { n: number; id: string; children: ReactNode }) {
   return (
-    <h2 id={id} className="flex items-center gap-3 font-serif text-2xl font-semibold tracking-tight">
-      <span aria-hidden="true" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-base text-on-brand">{n}</span>
+    <h2 id={id} className="flex items-center gap-3 font-serif text-heading font-semibold">
+      <span aria-hidden="true" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink font-sans text-base text-paper">{n}</span>
       {children}
     </h2>
   );
@@ -440,23 +499,23 @@ function EvidenceEditor({ index, sentences, sets, onChange }: { index: number; s
   };
 
   return (
-    <div className="space-y-3 rounded-xl bg-paper p-3" data-testid={`t-ev-${index}`}>
-      <div className="flex items-center gap-2 text-sm font-medium"><span aria-hidden="true" className="inline-block h-4 w-6 rounded bg-marker" />{t('tEvidence')}</div>
-      <div className="flex flex-wrap items-center gap-1.5" role="tablist">
+    <div className="space-y-3 rounded-control bg-sunken p-3 sm:p-4" data-testid={`t-ev-${index}`}>
+      <div className="flex items-center gap-2 text-sm font-medium"><span aria-hidden="true" className="inline-block h-4 w-6 rounded-[3px] bg-marker" />{t('tEvidence')}</div>
+      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={t('tEvidence')}>
         {safeSets.map((s, k) => (
           <span key={k} className="inline-flex items-center">
             <button type="button" role="tab" aria-selected={k === cur} data-testid={`t-ev-${index}-set-${k}`} onClick={() => setActive(k)}
-              className={`min-h-9 px-3 py-1 text-xs ${safeSets.length > 1 ? 'rounded-l-lg' : 'rounded-lg'} ${k === cur ? 'bg-brand font-semibold text-on-brand' : 'border border-line bg-card'}`}>
+              className={`min-h-9 border px-3 py-1 text-xs tabular-nums ${safeSets.length > 1 ? 'rounded-l-chip' : 'rounded-chip'} ${k === cur ? 'border-ink bg-ink font-semibold text-paper' : 'border-line-strong/60 bg-card text-ink hover:bg-brand-soft'}`}>
               {t('tSet', { n: k + 1 })}: {s.join(', ') || '—'}
             </button>
             {safeSets.length > 1 && (
               <button type="button" aria-label={t('tRemoveSet', { n: k + 1 })} data-testid={`t-ev-${index}-del-${k}`}
                 onClick={() => { onChange(safeSets.filter((_, j) => j !== k)); setActive(0); }}
-                className="min-h-9 rounded-r-lg border border-l-0 border-line bg-card px-2.5 py-1 text-xs hover:bg-bad-soft hover:text-bad">×</button>
+                className="inline-flex min-h-9 items-center rounded-r-chip border border-l-0 border-line-strong/60 bg-card px-2 text-ink hover:bg-bad-soft hover:text-bad"><Icon name="x" className="h-3.5 w-3.5" /></button>
             )}
           </span>
         ))}
-        <button type="button" className="min-h-9 rounded-lg border border-dashed border-brand/50 px-3 py-1 text-xs font-medium text-brand-ink hover:bg-brand-soft" data-testid={`t-ev-${index}-add`}
+        <button type="button" className="min-h-9 rounded-chip border border-dashed border-brand-ink/60 px-3 py-1 text-xs font-medium text-brand-ink hover:bg-brand-soft" data-testid={`t-ev-${index}-add`}
           onClick={() => { onChange([...safeSets.filter((s) => s.length), []]); setActive(safeSets.filter((s) => s.length).length); }}>{t('tAddSet')}</button>
       </div>
       <div className="space-y-1 font-serif">
@@ -464,16 +523,16 @@ function EvidenceEditor({ index, sentences, sets, onChange }: { index: number; s
           const on = (safeSets[cur] ?? []).includes(s.id);
           return (
             <button key={s.id} type="button" aria-pressed={on} data-testid={`t-ev-${index}-${s.id}`} onClick={() => toggle(s.id)}
-              className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[0.95rem] transition-colors ${on ? 'bg-marker text-marker-ink' : 'hover:bg-marker/30 active:bg-marker/70'}`}>
-              <span className={`mt-0.5 inline-flex h-5 min-w-8 shrink-0 items-center justify-center rounded-full px-1 font-sans text-[11px] font-semibold ${on ? 'bg-brand text-on-brand' : 'border border-line text-muted'}`}>{on ? `✓ ${s.id}` : s.id}</span>
-              <span>{s.text}</span>
+              className={`flex w-full items-start gap-2.5 rounded-chip px-2 py-1.5 text-left text-[0.95rem] transition-colors duration-150 ${on ? 'bg-marker text-marker-ink underline decoration-marker-ink/50 decoration-2 underline-offset-4' : 'hover:bg-marker/40 active:bg-marker/70'}`}>
+              <span className={`mt-0.5 inline-flex h-5 min-w-9 shrink-0 items-center justify-center gap-0.5 rounded-full px-1 font-sans text-[0.6875rem] font-semibold no-underline tabular-nums ${on ? 'bg-ink text-paper' : 'border border-line-strong/60 text-muted'}`}>{on && <Icon name="check" className="h-3 w-3" />}{s.id}</span>
+              <span className="wrap-any">{s.text}</span>
             </button>
           );
         })}
       </div>
       <details className="text-xs">
-        <summary className="cursor-pointer text-muted">{t('tEvidenceText')}</summary>
-        <input className="input mt-1 w-full font-mono" data-testid={`t-evidence-${index}`} value={text} aria-label={t('tEvidenceText')}
+        <summary className="inline-flex min-h-8 cursor-pointer items-center text-muted">{t('tEvidenceText')}</summary>
+        <input className="input mt-1 w-full font-mono text-sm" data-testid={`t-evidence-${index}`} value={text} aria-label={t('tEvidenceText')}
           onChange={(e) => { setText(e.target.value); onChange(parseEvidence(e.target.value)); }} />
       </details>
     </div>

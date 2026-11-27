@@ -31,14 +31,14 @@ export default defineConfig({
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'Oqy — читать и понимать', short_name: 'Oqy', lang: 'ru', display: 'standalone',
-        theme_color: '#245740', background_color: '#F8F5ED', start_url: '.',
+        theme_color: '#2547A0', background_color: '#F7F5EF', start_url: '.',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
       },
-      // Шрифты: в precache только кириллица и латиница (в т.ч. казахские буквы в cyrillic-ext); прочие подмножества грузятся лишь при необходимости.
+      // Шрифты: в сборку попадают только подмножества latin, cyrillic и cyrillic-ext (казахские буквы) — все они в precache.
       workbox: {
         clientsClaim: true,
         skipWaiting: true,
-        globPatterns: ['**/*.{js,css,html,svg,json}', '**/*-{latin,latin-ext,cyrillic,cyrillic-ext}-wght-normal-*.woff2'],
+        globPatterns: ['**/*.{js,css,html,svg,json,woff2}'],
         globIgnores: ['version.json'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/\/api\//, /\/version\.json(?:\?|$)/],

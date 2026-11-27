@@ -1,76 +1,148 @@
-/* Шрифты лежат локально (пакеты @fontsource) и попадают в precache PWA — работают офлайн, без внешних CDN.
-   Inter и Literata покрывают кириллицу и казахские буквы ә ғ қ ң ө ұ ү һ і (подмножества cyrillic + cyrillic-ext). */
-@import '@fontsource-variable/inter/wght.css';
-@import '@fontsource-variable/literata/wght.css';
+/* ─────────────────────────────────────────────────────────────────────────────
+   Oqy · дизайн-система v2 «Тетрадь»
+   Синие чернила + жёлтый маркер на тёплой бумаге (и цвета флага Казахстана — небесный и золотой).
+   Все токены — здесь; tailwind.config.js только даёт им имена. Компоненты не используют цвета напрямую.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Шрифты — локально, только латиница и кириллица (в cyrillic-ext — казахские ә ғ қ ң ө ү һ; ұ и і — в cyrillic).
+   Файлы попадают в precache PWA и работают без сети. Golos Text — интерфейс, Literata (с оптическим кеглем) — заголовки и тексты. */
+@font-face {
+  font-family: 'Golos Text Variable'; font-style: normal; font-display: swap; font-weight: 400 900;
+  src: url('../../node_modules/@fontsource-variable/golos-text/files/golos-text-cyrillic-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Golos Text Variable'; font-style: normal; font-display: swap; font-weight: 400 900;
+  src: url('../../node_modules/@fontsource-variable/golos-text/files/golos-text-cyrillic-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Golos Text Variable'; font-style: normal; font-display: swap; font-weight: 400 900;
+  src: url('../../node_modules/@fontsource-variable/golos-text/files/golos-text-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Literata Variable'; font-style: normal; font-display: swap; font-weight: 200 900;
+  src: url('../../node_modules/@fontsource-variable/literata/files/literata-cyrillic-ext-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Literata Variable'; font-style: normal; font-display: swap; font-weight: 200 900;
+  src: url('../../node_modules/@fontsource-variable/literata/files/literata-cyrillic-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Literata Variable'; font-style: normal; font-display: swap; font-weight: 200 900;
+  src: url('../../node_modules/@fontsource-variable/literata/files/literata-latin-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* «Современный школьный журнал»: бумага, тёмные чернила, глубокий зелёный, жёлтый маркер.
-   Каналы RGB — чтобы работала прозрачность Tailwind (bg-brand/10). */
+/* Цвета — каналы RGB (для прозрачности Tailwind: bg-brand/10). Пары текст/фон измерены: ≥ 4.5:1, границы контролов ≥ 3:1. */
 :root {
-  --paper: 248 245 237;      /* #F8F5ED */
-  --card: 255 253 248;
-  --ink: 32 40 32;           /* #202820 */
-  --muted: 86 96 84;
-  --line: 222 215 198;
-  --brand: 36 87 64;         /* #245740 */
-  --brand-ink: 36 87 64;
-  --brand-soft: 230 239 231;
+  /* Поверхности */
+  --paper: 247 245 239;        /* #F7F5EF — страница */
+  --card: 255 254 251;         /* #FFFEFB — карточка */
+  --sunken: 240 237 228;       /* #F0EDE4 — вложенный блок */
+  /* Текст */
+  --ink: 23 32 51;             /* #172033 — основной */
+  --muted: 79 88 107;          /* #4F586B — второстепенный, 6.6:1 на бумаге */
+  /* Линии */
+  --line: 224 219 206;         /* #E0DBCE — разделители и контуры карточек */
+  --line-strong: 128 134 148;  /* #808694 — граница полей ввода, 3.4:1 */
+  /* Акцент: синие чернила */
+  --brand: 37 71 160;          /* #2547A0 — заливка главной кнопки, 8.4:1 с белым */
+  --brand-ink: 37 71 160;      /* акцентный текст и кольцо фокуса */
+  --brand-soft: 231 236 248;   /* #E7ECF8 — выбранный вариант */
   --on-brand: 255 255 255;
-  --marker: 245 224 151;     /* #F5E097 */
-  --marker-ink: 32 40 32;
-  --ok: 30 104 66;
-  --ok-soft: 226 240 229;
-  --warn: 128 78 0;
-  --warn-soft: 251 240 212;
-  --bad: 160 44 38;
-  --bad-soft: 250 230 226;
+  /* Маркер: выделение доказательств (только этот смысл) */
+  --marker: 255 226 102;       /* #FFE266 */
+  --marker-ink: 23 32 51;
+  /* Статусы */
+  --ok: 27 104 64;    --ok-soft: 225 241 230;
+  --warn: 135 72 6;   --warn-soft: 252 238 214;
+  --bad: 176 34 24;   --bad-soft: 252 231 228;
+
+  --shadow-card: 0 1px 0 rgb(23 32 51 / 0.04), 0 1px 3px rgb(23 32 51 / 0.06);
+  --shadow-raised: 0 1px 0 rgb(23 32 51 / 0.06), 0 8px 24px -10px rgb(23 32 51 / 0.25);
+  --shadow-cta: 0 1px 0 rgb(23 32 51 / 0.1), 0 10px 22px -12px rgb(37 71 160 / 0.7);
+  /* Клетка тетради — только в декоративных подложках. */
+  --grid-line: 37 71 160 / 0.07;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: 22 26 22;
-    --card: 31 36 31;
-    --ink: 236 232 220;
-    --muted: 170 176 162;
-    --line: 62 70 62;
-    --brand: 46 114 84;
-    --brand-ink: 144 208 170;
-    --brand-soft: 34 56 44;
+    --paper: 15 19 27;          /* #0F131B */
+    --card: 24 30 41;           /* #181E29 */
+    --sunken: 19 24 33;
+    --ink: 236 232 222;
+    --muted: 168 176 192;       /* 7.6:1 на карточке */
+    --line: 47 55 71;
+    --line-strong: 112 121 139; /* 3.5:1 на карточке */
+    --brand: 58 94 196;         /* #3A5EC4 — 5.3:1 с белым */
+    --brand-ink: 166 188 247;   /* #A6BCF7 */
+    --brand-soft: 30 41 70;
     --on-brand: 255 255 255;
-    --marker: 245 224 151;
-    --marker-ink: 32 40 32;
-    --ok: 134 210 160;
-    --ok-soft: 30 52 38;
-    --warn: 240 196 110;
-    --warn-soft: 58 46 22;
-    --bad: 244 150 140;
-    --bad-soft: 64 32 30;
+    --marker: 245 212 86;
+    --marker-ink: 23 32 51;
+    --ok: 128 212 162;  --ok-soft: 20 46 32;
+    --warn: 242 190 110; --warn-soft: 52 38 16;
+    --bad: 246 158 148; --bad-soft: 60 26 24;
+    --shadow-card: 0 1px 0 rgb(0 0 0 / 0.25);
+    --shadow-raised: 0 1px 0 rgb(0 0 0 / 0.3), 0 10px 28px -12px rgb(0 0 0 / 0.7);
+    --shadow-cta: 0 1px 0 rgb(0 0 0 / 0.3), 0 10px 22px -12px rgb(0 0 0 / 0.8);
+    --grid-line: 166 188 247 / 0.06;
     color-scheme: dark;
   }
 }
 
-html { scroll-padding-top: 1rem; }
+html { scroll-padding-top: 1rem; -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-body { @apply bg-paper font-sans text-ink antialiased; overflow-wrap: anywhere; -webkit-text-size-adjust: 100%; }
+/* Уменьшение движения: переходы и анимации выключаются (состояния меняются мгновенно, подписи остаются). */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+body { @apply bg-paper font-sans text-body text-ink antialiased; overflow-wrap: break-word; -webkit-text-size-adjust: 100%; font-feature-settings: normal; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
 :focus-visible { outline: 3px solid rgb(var(--brand-ink)); outline-offset: 2px; }
+::selection { background: rgb(var(--marker)); color: rgb(var(--marker-ink)); }
 
 @layer components {
-  .card { @apply rounded-2xl border border-line bg-card p-5; }
-  .h2 { @apply mb-3 font-serif text-2xl font-semibold tracking-tight; }
-  .kicker { @apply text-xs font-semibold uppercase tracking-[0.14em] text-muted; }
-  .btn { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-2.5 font-semibold text-on-brand shadow-sm transition hover:brightness-110 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100; }
-  .btn-lg { @apply min-h-14 px-7 text-lg; }
-  .btn-ghost { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-card px-4 py-2 font-medium text-brand-ink transition hover:border-brand/50 hover:bg-brand-soft active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40; }
-  .badge { @apply inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-muted; }
-  .input { @apply rounded-xl border border-line bg-card px-3 py-2 text-ink placeholder:text-muted/70; }
-  .link { @apply font-medium text-brand-ink underline decoration-brand/40 decoration-2 underline-offset-4 hover:decoration-brand; }
+  /* Поверхности */
+  .card { @apply rounded-card border border-line bg-card p-5 shadow-card; }
+  .panel { @apply rounded-control bg-sunken p-4; }
+  .kicker { @apply text-caption font-semibold uppercase tracking-[0.08em] text-muted; }
+  .notebook { background-image: linear-gradient(rgb(var(--grid-line)) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--grid-line)) 1px, transparent 1px); background-size: 24px 24px; }
 
-  /* Предложение текста: реагирует на нажатие; выбранное — маркер + подчёркивание + галочка в номере (не только цвет). */
-  .sent { @apply max-w-full rounded-md px-1 py-0.5 text-left transition-colors hover:bg-marker/35 active:bg-marker/80 disabled:cursor-default disabled:hover:bg-transparent; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-  .sent[aria-pressed='true'] { @apply bg-marker text-marker-ink underline decoration-2 underline-offset-[5px] hover:bg-marker; text-decoration-color: rgb(var(--marker-ink) / 0.45); }
-  .sent-num { @apply mr-1 inline-flex h-5 min-w-5 -translate-y-px items-center justify-center rounded-full border border-line px-1 align-middle font-sans text-[11px] font-semibold not-italic text-muted no-underline; }
-  .sent[aria-pressed='true'] .sent-num { @apply border-transparent bg-brand text-on-brand; }
+  /* Кнопки: одна главная (залитая) на экран, остальные — контурные. Нажатие — масштаб 0.96, без сдвига раскладки. */
+  .btn { @apply inline-flex min-h-11 select-none items-center justify-center gap-2 rounded-control border border-transparent bg-brand px-5 py-2.5 font-semibold text-on-brand shadow-cta transition-[filter,transform] duration-150 ease-out hover:brightness-110 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none disabled:hover:brightness-100 disabled:active:scale-100; }
+  .btn-lg { @apply min-h-14 px-7 text-lg; }
+  .btn-ghost { @apply inline-flex min-h-11 select-none items-center justify-center gap-2 rounded-control border border-line-strong/60 bg-card px-4 py-2 font-medium text-ink transition-[background-color,border-color,transform] duration-150 ease-out hover:border-brand-ink hover:bg-brand-soft active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line-strong/60 disabled:hover:bg-card disabled:active:scale-100; }
+  .btn-sm { @apply min-h-9 px-3 py-1 text-sm; }
+  .btn-danger { @apply text-bad hover:border-bad hover:bg-bad-soft; }
+  .badge { @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-line px-2.5 py-0.5 text-caption font-medium text-muted; }
+  .input { @apply min-h-11 rounded-control border border-line-strong bg-card px-3 py-2 text-base text-ink placeholder:text-muted transition-colors duration-150 hover:border-ink/70 disabled:opacity-60; }
+  .field-label { @apply mb-1 block text-sm font-medium text-muted; }
+  .wrap-any { overflow-wrap: anywhere; }
+  .link { @apply font-medium text-brand-ink underline decoration-brand-ink/40 decoration-2 underline-offset-4 transition-colors hover:decoration-brand-ink; }
+
+  /* Сообщения: цвет + значок + текст (никогда только цвет). */
+  .note { @apply flex items-start gap-2.5 rounded-control p-3 text-sm; overflow-wrap: anywhere; }
+  .note-ok { @apply bg-ok-soft text-ok; }
+  .note-warn { @apply bg-warn-soft text-warn; }
+  .note-bad { @apply bg-bad-soft text-bad; }
+  .note-info { @apply bg-brand-soft text-ink; }
+
+  /* Номер шага / круглая метка */
+  .step-dot { @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-paper; }
+
+  /* Предложение текста: выбранное — маркер + подчёркивание + галочка вместо номера (не только цвет) + видимый фокус. */
+  .sent { @apply max-w-full rounded-chip px-1 py-0.5 text-left transition-colors duration-150 hover:bg-marker/40 active:bg-marker/80 disabled:cursor-default disabled:hover:bg-transparent; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .sent[aria-pressed='true'] { @apply bg-marker text-marker-ink underline decoration-2 underline-offset-[5px] hover:bg-marker; text-decoration-color: rgb(var(--marker-ink) / 0.55); }
+  .sent-num { @apply mr-1 inline-flex h-5 min-w-5 -translate-y-px items-center justify-center rounded-full border border-line-strong/60 px-1 align-middle font-sans text-[0.6875rem] font-semibold tabular-nums text-muted no-underline; }
+  .sent[aria-pressed='true'] .sent-num { @apply border-transparent bg-ink text-paper; }
 }

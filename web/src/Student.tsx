@@ -4,6 +4,7 @@ import { checkAnswer, DEFAULT_GRADE, feedbackParts, GRADES, GradeSchema, parseLe
 import { BUILTIN_LESSONS } from '../../shared/builtin';
 import { db, importLesson, readProgress, solvedKeys } from './db';
 import { PITCH_URL, useI18n } from './i18n';
+import { Icon, Spinner } from './Icon';
 
 type Play = { lesson: Lesson; taskIds: string[]; startIdx?: number };
 
@@ -49,67 +50,87 @@ export function Student() {
 
   return (
     <div className="space-y-14 pt-6 sm:space-y-20 sm:pt-12">
-      <section className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]" aria-labelledby="hero-title">
+      <section className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14" aria-labelledby="hero-title">
         <div>
           <p className="kicker">{t('heroKicker')}</p>
-          <h1 id="hero-title" className="mt-3 text-balance font-serif text-[2.15rem] font-semibold leading-[1.08] tracking-tight sm:text-5xl xl:text-[3.6rem]">{t('heroTitle')}</h1>
-          <p className="mt-4 max-w-xl text-pretty text-lg leading-relaxed text-muted sm:text-xl">{t('heroSub')}</p>
-          <div role="group" aria-label={t('gradeLabel')} className="mt-5 flex flex-wrap gap-2" data-testid="grade-filter">
-            {GRADE_FILTERS.map((g) => (
-              <button type="button" key={g} aria-pressed={grade === g} data-testid={`grade-${g}`}
-                className={grade === g ? 'btn' : 'btn-ghost'} onClick={() => selectGrade(g)}>{g === 'all' ? t('gradeAll') : t('grade', { g })}</button>
-            ))}
+          <h1 id="hero-title" className="mt-3 font-serif text-display font-semibold">{t('heroTitle')}</h1>
+          <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">{t('heroSub')}</p>
+          <div className="mt-6 flex flex-col gap-4 sm:mt-8">
+            <div className="flex flex-wrap items-center gap-3">
+              <span id="grade-label" className="text-sm font-medium text-muted">{t('gradeLabel')}</span>
+              {/* Класс: сегменты с видимой цифрой; доступное имя — полное («7 класс»). */}
+              <div role="group" aria-labelledby="grade-label" className="inline-flex rounded-full border border-line-strong/50 bg-card p-1" data-testid="grade-filter">
+                {GRADE_FILTERS.map((g) => (
+                  <button type="button" key={g} aria-pressed={grade === g} data-testid={`grade-${g}`} aria-label={g === 'all' ? undefined : t('grade', { g })}
+                    className={`min-h-10 min-w-11 rounded-full px-3.5 text-sm tabular-nums transition-colors duration-150 ${grade === g ? 'bg-ink font-semibold text-paper' : 'text-muted hover:bg-sunken hover:text-ink'}`}
+                    onClick={() => selectGrade(g)}>{g === 'all' ? t('gradeAll') : g}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col items-stretch gap-2 sm:items-start">
+              <button type="button" className="btn btn-lg" data-testid="start-lesson" disabled={!start} onClick={startPlay}>
+                {t('startLesson')} <Icon name="arrow-right" />
+              </button>
+              {start && (
+                <p className="wrap-any text-sm text-muted" data-testid="start-caption">
+                  <span lang={start.language}>{t('startCaption', { title: start.title, total: start.tasks.length })}</span>
+                </p>
+              )}
+            </div>
           </div>
-          <div className="mt-7 flex flex-col items-start gap-3">
-            <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="start-lesson" disabled={!start} onClick={startPlay}>
-              {t('startLesson')} <span aria-hidden="true">→</span>
-            </button>
-            {start && (
-              <p className="text-sm text-muted" data-testid="start-caption">
-                <span lang={start.language}>{t('startCaption', { title: start.title, total: start.tasks.length })}</span>
-              </p>
-            )}
-          </div>
-          <p className="mt-6 text-sm">
-            <a className="link" href={PITCH_URL} target="_blank" rel="noopener noreferrer" data-testid="pitch-link">▶ {t('pitchLink')}</a>
+          <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <span className="text-muted">{t('forTeacher')}</span>
+            <a className="link inline-flex items-center gap-1.5" href={PITCH_URL} target="_blank" rel="noopener noreferrer" data-testid="pitch-link">
+              <Icon name="play" className="h-3.5 w-3.5" />{t('pitchLink')}
+            </a>
           </p>
         </div>
         <HeroExample lang={lang} grade={start?.grade ?? (grade === 'all' ? DEFAULT_GRADE : grade)} />
       </section>
 
       <section aria-labelledby="lessons-title">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-3">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-4">
           <div>
-            <h2 id="lessons-title" className="font-serif text-3xl font-semibold tracking-tight">{t('lessons')}</h2>
+            <h2 id="lessons-title" className="font-serif text-title font-semibold">{t('lessons')}</h2>
             <p className="mt-1 text-sm text-muted">{t('lessonsLead')}</p>
           </div>
           <button type="button" className="btn-ghost" data-testid="import-open" aria-expanded={importOpen} aria-controls={importId} onClick={() => setImportOpen((o) => !o)}>
-            <span aria-hidden="true">{importOpen ? '−' : '+'}</span> {t('addLesson')}
+            <Icon name={importOpen ? 'minus' : 'plus'} className="h-4 w-4" /> {t('addLesson')}
           </button>
         </div>
-        {importOpen && <div id={importId} className="mt-4"><ImportBox onImported={selectGrade} /></div>}
-        {rows && !ordered.length && <p className="mt-5 text-sm text-muted" data-testid="grade-empty">{t('gradeEmpty')}</p>}
-        <ul className="mt-5 grid gap-4 sm:grid-cols-2">
+        {importOpen && <div id={importId} className="mt-5"><ImportBox onImported={selectGrade} /></div>}
+        {rows === undefined && <p className="mt-5 flex items-center gap-2 text-sm text-muted" role="status"><Spinner />{t('loading')}</p>}
+        {rows && !ordered.length && (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-card border border-dashed border-line-strong/60 p-5">
+            <p className="text-sm text-muted" data-testid="grade-empty">{t('gradeEmpty')}</p>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => selectGrade('all')}>{t('gradeShowAll')}</button>
+          </div>
+        )}
+        <ul className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {ordered.map(({ lesson, source }) => {
             const done = lesson.tasks.filter((x) => solved.has(`${lesson.id}/${x.id}`)).length;
             const complete = !!progress && done === lesson.tasks.length;
+            const cta = complete ? t('cardRepeat') : done > 0 ? t('cardContinue') : t('cardStart');
             return (
               <li key={lesson.id}>
-                <button type="button" className="card group flex h-full w-full flex-col text-left transition hover:border-brand/60 hover:shadow-md active:translate-y-px"
+                <button type="button" className="card group flex h-full w-full flex-col text-left transition-[border-color,box-shadow] duration-150 hover:border-brand-ink/50 hover:shadow-raised"
                   data-testid={`lesson-${lesson.id}`} onClick={() => setPlay({ lesson, taskIds: lesson.tasks.map((x) => x.id) })}>
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="badge" lang={lesson.language}>{LANG_NAME[lesson.language]}</span>
-                    <span className="text-xs text-muted">{t('grade', { g: lesson.grade })}</span>
-                    {source !== 'builtin' && <span className="badge">{t('imported')}</span>}
-                    {complete && <span className="badge border-ok/40 bg-ok-soft text-ok">✓ {t('lessonDone')}</span>}
+                    <span className="badge text-ink" lang={lesson.language}>{LANG_NAME[lesson.language]}</span>
+                    <span className="badge">{t('grade', { g: lesson.grade })}</span>
+                    {source !== 'builtin' && <span className="badge border-dashed">{t('imported')}</span>}
+                    {complete && <span className="badge border-ok/40 bg-ok-soft text-ok"><Icon name="check" className="h-3.5 w-3.5" />{t('lessonDone')}</span>}
+                    <span className="ml-auto inline-flex items-center gap-1 text-sm font-semibold text-brand-ink" aria-hidden="true">{cta}<Icon name="arrow-right" className="h-4 w-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-hover:translate-x-0.5" /></span>
                   </span>
-                  <span className="mt-3 font-serif text-xl font-semibold leading-snug group-hover:text-brand-ink" lang={lesson.language}>{lesson.title}</span>
-                  <span className="mt-1 line-clamp-2 text-sm text-muted" lang={lesson.language}>{lesson.sentences[0]?.text}</span>
-                  <span className="mt-auto flex flex-wrap items-center gap-3 pt-4">
-                    <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
-                      {lesson.tasks.map((x) => <span key={x.id} className={`h-1.5 w-6 rounded-full ${solved.has(`${lesson.id}/${x.id}`) ? 'bg-brand' : 'bg-line'}`} />)}
+                  <span className="wrap-any mt-4 font-serif text-subheading font-semibold" lang={lesson.language}>{lesson.title}</span>
+                  <span className="wrap-any mt-1.5 line-clamp-2 text-sm text-muted" lang={lesson.language}>{lesson.sentences[0]?.text}</span>
+                  <span className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-5">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
+                        {lesson.tasks.map((x) => <span key={x.id} className={`h-2 w-6 rounded-full ${solved.has(`${lesson.id}/${x.id}`) ? 'bg-brand' : 'border border-line-strong/50 bg-sunken'}`} />)}
+                      </span>
+                      <span className="text-sm tabular-nums text-muted">{progress ? t('doneOf', { d: done, n: lesson.tasks.length }) : t(progress === undefined ? 'loading' : 'progressUnavailable')}</span>
                     </span>
-                    <span className="text-sm text-muted">{progress ? t('doneOf', { d: done, n: lesson.tasks.length }) : t(progress === undefined ? 'loading' : 'progressUnavailable')}</span>
                   </span>
                 </button>
               </li>
@@ -119,21 +140,26 @@ export function Student() {
       </section>
 
       <section aria-labelledby="progress-title">
-        <div className="border-b border-line pb-3">
-          <h2 id="progress-title" className="font-serif text-3xl font-semibold tracking-tight">{t('progressTitle')}</h2>
+        <div className="border-b border-line pb-4">
+          <h2 id="progress-title" className="font-serif text-title font-semibold">{t('progressTitle')}</h2>
           <p className="mt-1 text-sm text-muted">{t('progressLead')}</p>
         </div>
         {!progress ? (
           <p className="mt-5 text-sm text-muted" role="status" data-testid="progress">{t(progress === undefined ? 'loading' : 'progressUnavailable')}</p>
-        ) : <div className="mt-5 grid gap-4 sm:grid-cols-3" data-testid="progress">
+        ) : <ul className="mt-5 grid gap-4 sm:grid-cols-3" data-testid="progress">
           {(['find', 'match', 'infer'] as Skill[]).map((s, i) => (
-            <div key={s} className="card" data-testid={`progress-${s}`}>
-              <div className="text-sm font-medium text-muted"><span className="mr-2 font-serif text-brand-ink">{i + 1}</span>{SKILL_LABELS[lang][s]}</div>
-              <div className="mt-2 font-serif text-4xl font-semibold">{progress.skills[s].solved}<span className="font-sans text-base font-normal text-muted"> {t('solved')}</span></div>
-              <div className="mt-1 text-xs text-muted">{t('errorsAttempts', { e: progress.skills[s].errors, a: progress.skills[s].attempts })}</div>
-            </div>
+            <li key={s} className="card" data-testid={`progress-${s}`}>
+              <div className="flex items-center gap-2.5 text-sm font-medium text-ink">
+                <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">{i + 1}</span>{SKILL_LABELS[lang][s]}
+              </div>
+              <div className="mt-3 flex items-baseline gap-1.5">
+                <span className="font-serif text-[2.5rem] font-semibold leading-none tabular-nums">{progress.skills[s].solved}</span>{' '}
+                <span className="text-sm text-muted">{t('solved')}</span>
+              </div>
+              <div className="mt-2 text-caption tabular-nums text-muted">{t('errorsAttempts', { e: progress.skills[s].errors, a: progress.skills[s].attempts })}</div>
+            </li>
           ))}
-        </div>}
+        </ul>}
       </section>
     </div>
   );
@@ -155,25 +181,31 @@ function HeroExample({ lang, grade }: { lang: Language; grade: Grade }) {
   const answer = task.options.find((o) => o.id === task.correctOptionId)?.text;
   return (
     <figure className="relative hidden lg:block" lang={lesson.language} data-testid="hero-example">
-      <div className="absolute -inset-x-3 -bottom-3 top-3 rotate-1 rounded-2xl border border-line bg-card/60" aria-hidden="true" />
-      <div className="relative rounded-2xl border border-line bg-card p-7 shadow-sm">
+      <div className="notebook absolute -inset-6 rounded-card" aria-hidden="true" />
+      <div className="relative rounded-card border border-line bg-card p-7 shadow-raised">
         <figcaption className="kicker" lang={lang}>{t('exampleLabel')} · <span lang={lesson.language} className="normal-case tracking-normal">«{lesson.title}»</span></figcaption>
-        <p className="mt-4 font-serif text-[1.15rem] leading-9">
+        <p className="mt-4 font-serif text-[1.125rem] leading-[2.1]">
           {shown.map((s, k) => {
             const n = from + k + 1;
             return s.id === ev
-              ? <mark key={s.id} className="rounded-md bg-marker px-1 py-0.5 text-marker-ink underline decoration-2 underline-offset-[5px] [box-decoration-break:clone] [-webkit-box-decoration-break:clone]" style={{ textDecorationColor: 'rgb(var(--marker-ink) / 0.45)' }}><span className="sent-num border-transparent bg-brand text-on-brand">✓</span>{s.text}</mark>
-              : <span key={s.id} className="text-ink/80"><span className="sent-num">{n}</span>{s.text}</span>;
+              ? <mark key={s.id} className="rounded-chip bg-marker px-1 py-0.5 text-marker-ink underline decoration-2 underline-offset-[5px] [box-decoration-break:clone] [-webkit-box-decoration-break:clone]" style={{ textDecorationColor: 'rgb(var(--marker-ink) / 0.55)' }}><span className="sent-num border-transparent bg-ink text-paper"><Icon name="check" className="h-3 w-3" /></span>{s.text}</mark>
+              : <span key={s.id} className="text-muted"><span className="sent-num">{n}</span>{s.text}</span>;
           }).reduce<ReactNode[]>((acc, el, k) => (k ? [...acc, ' ', el] : [el]), [])}
         </p>
-        <div className="mt-6 space-y-2 border-t border-dashed border-line pt-5 text-sm">
+        <div className="mt-6 space-y-3 border-t border-dashed border-line-strong/50 pt-5 text-sm">
           <p className="font-medium">{task.question}</p>
-          <p className="flex flex-wrap items-center gap-2" lang={lang}>
-            <span className="text-muted">{t('exampleAnswer')}:</span>
-            <span className="rounded-full border border-brand/40 bg-brand-soft px-3 py-1 font-medium text-brand-ink" lang={lesson.language}>{answer}</span>
-            <span className="text-muted">{t('exampleEvidence')}:</span>
-            <span className="rounded-full bg-marker px-3 py-1 font-medium text-marker-ink">№ {at + 1}</span>
-          </p>
+          <ol className="grid gap-2" lang={lang}>
+            <li className="flex flex-wrap items-center gap-2">
+              <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">1</span>
+              <span className="text-muted">{t('exampleAnswer')}:</span>
+              <span className="rounded-full border border-brand-ink/40 bg-brand-soft px-3 py-1 font-medium text-ink" lang={lesson.language}>{answer}</span>
+            </li>
+            <li className="flex flex-wrap items-center gap-2">
+              <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">2</span>
+              <span className="text-muted">{t('exampleEvidence')}:</span>
+              <span className="rounded-full bg-marker px-3 py-1 font-medium text-marker-ink">{t('exampleSentence', { n: at + 1 })}</span>
+            </li>
+          </ol>
         </div>
       </div>
     </figure>
@@ -209,26 +241,38 @@ function ImportBox({ onImported }: { onImported: (grade: Grade) => void }) {
     }
   }
   return (
-    <div className="card border-dashed">
-      <h3 className="font-serif text-lg font-semibold">{t('importTitle')}</h3>
-      <p className="mt-1 text-sm text-muted">{t('importHint')}</p>
+    <div className="rounded-card border border-dashed border-line-strong/70 bg-card p-5 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-ink" aria-hidden="true"><Icon name="upload" /></span>
+        <div className="min-w-0">
+          <h3 className="font-serif text-subheading font-semibold">{t('importTitle')}</h3>
+          <p className="mt-1 text-sm text-muted">{t('importHint')}</p>
+        </div>
+      </div>
       {/* Своя подписанная кнопка вместо системного «Choose File»; сам input (data-testid=import-file) остаётся в DOM и доступен с клавиатуры. */}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <label className="btn cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <label className={`btn-ghost cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${importing ? 'pointer-events-none opacity-60' : ''}`}>
           <input type="file" accept="application/json,.json" data-testid="import-file" className="sr-only" disabled={importing}
             onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) void handle(f); }} />
-          <span aria-hidden="true">↥</span> {t('importChoose')}
+          {importing ? <Spinner /> : <Icon name="upload" className="h-4 w-4" />} {t('importChoose')}
         </label>
         <span className="min-w-0 break-all text-sm text-muted" data-testid="import-filename">{fileName ? t('importFile', { name: fileName }) : t('importNoFile')}</span>
       </div>
+      {importing && <p className="mt-3 flex items-center gap-2 text-sm text-muted" role="status"><Spinner />{t('importBusy')}</p>}
       {msg && (
         <p role="status" data-testid={msg.kind === 'ok' ? 'import-ok' : `import-${msg.kind}`}
-          className={`mt-3 rounded-xl p-3 text-sm ${msg.kind === 'ok' ? 'bg-ok-soft text-ok' : 'bg-brand-soft text-ink'}`}>{msg.text}</p>
+          className={`note mt-4 ${msg.kind === 'ok' ? 'note-ok' : 'note-info'}`}>
+          <Icon name={msg.kind === 'ok' ? 'check' : 'info'} className="mt-px h-5 w-5" /><span>{msg.text}</span>
+        </p>
       )}
       {errors.length > 0 && (
-        <div className="mt-3 rounded-xl bg-bad-soft p-3 text-sm text-bad" data-testid="import-errors" role="alert">
-          <b>{t('importFailed')}</b>
-          <ul className="list-disc pl-5">{errors.slice(0, 8).map((e) => <li key={e}>{e}</li>)}</ul>
+        <div className="note note-bad mt-4" data-testid="import-errors" role="alert">
+          <Icon name="alert" className="mt-px h-5 w-5" />
+          <div className="min-w-0">
+            <b>{t('importFailed')}</b>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">{errors.slice(0, 8).map((e) => <li key={e}>{e}</li>)}</ul>
+            <p className="mt-2 text-ink">{t('importRetry')}</p>
+          </div>
         </div>
       )}
     </div>
@@ -245,7 +289,9 @@ const PLAYER_TEXT = {
     saving: 'Сохраняю…', saveError: 'Не удалось сохранить попытку. Ответ и цитаты остались выбраны. Попробуй ещё раз.',
     done: 'Урок пройден!', more: 'Ещё одно задание', back: 'К урокам', task: 'Задание {n} из {total}',
     weak: 'Навык с ошибками:', noRec: 'Дополнительное задание не требуется.', recLoading: 'Подбираю дополнительное задание…',
-    recError: 'Не удалось загрузить рекомендацию.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
+    recError: 'Не удалось загрузить рекомендацию. Вернись к урокам и выбери следующий.', solved: 'Отлично: ответ доказан.', sentence: 'Предложение',
+    textLabel: 'Текст', grade: '{g} класс', doneLead: 'Все задания решены: ответы выбраны и доказаны цитатами из текста.', recTitle: 'Потренируй навык',
+    retry: 'Исправь то, что отмечено крестиком, и проверь ещё раз.',
   },
   kk: {
     check: 'Тексеру', recheck: 'Қайта тексеру', next: 'Келесі тапсырма', finish: 'Сабақты аяқтау', hint: 'Кеңес',
@@ -256,7 +302,9 @@ const PLAYER_TEXT = {
     saving: 'Сақталуда…', saveError: 'Тапсырма нәтижесі сақталмады. Жауап пен дәлелдер белгіленіп тұр. Қайта тексеріп көр.',
     done: 'Сабақ аяқталды!', more: 'Тағы бір тапсырма', back: 'Сабақтарға', task: '{total} тапсырманың {n}-сі',
     weak: 'Қатесі бар дағды:', noRec: 'Қосымша тапсырма қажет емес.', recLoading: 'Қосымша тапсырма таңдалуда…',
-    recError: 'Ұсынысты жүктеу мүмкін болмады.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
+    recError: 'Ұсынысты жүктеу мүмкін болмады. Сабақтарға оралып, келесісін таңда.', solved: 'Тамаша: жауап дәлелденді.', sentence: 'Сөйлем',
+    textLabel: 'Мәтін', grade: '{g}-сынып', doneLead: 'Барлық тапсырма орындалды: жауаптар таңдалып, мәтіннен дәлелденді.', recTitle: 'Дағдыны жаттықтыр',
+    retry: 'Айқышпен белгіленгенді түзетіп, қайта тексер.',
   },
 } as const;
 
@@ -264,7 +312,9 @@ const fill = (s: string, v: Record<string, string | number>) => s.replace(/\{(\w
 
 function Mark({ ok }: { ok: boolean }) {
   return (
-    <span aria-hidden="true" className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm font-bold ${ok ? 'bg-ok text-card' : 'bg-bad text-card'}`}>{ok ? '✓' : '✗'}</span>
+    <span aria-hidden="true" className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-card ${ok ? 'bg-ok' : 'bg-bad'}`}>
+      <Icon name={ok ? 'check' : 'x'} className="h-4 w-4" />
+    </span>
   );
 }
 
@@ -300,16 +350,19 @@ function ProofTest({ task, lesson, evidence, order }: { task: Task; lesson: Less
   const remaining = evidence.filter((id) => id !== removed);
   const enough = checkAnswer(task, task.correctOptionId, remaining).solved;
   return (
-    <details className="rounded-xl border border-brand/40 bg-brand-soft p-4" data-testid="proof-test">
-      <summary className="cursor-pointer font-semibold text-brand-ink">{t.title}</summary>
+    <details className="group rounded-control border border-line-strong/50 bg-sunken p-4" data-testid="proof-test">
+      <summary className="-m-1 flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-chip p-1 font-semibold text-ink [&::-webkit-details-marker]:hidden">
+        <Icon name="search" className="h-5 w-5 text-brand-ink" />{t.title}
+        <Icon name="arrow-down" className="ml-auto h-4 w-4 text-muted transition-transform duration-150 group-open:rotate-180" />
+      </summary>
       <fieldset className="mt-3 min-w-0 space-y-2">
         <legend className="text-sm font-medium">{t.choose}</legend>
         {evidence.map((id) => (
-          <label key={id} className={`flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm ${removed === id ? 'bg-card line-through' : ''}`}>
+          <label key={id} className={`flex min-h-11 cursor-pointer items-start gap-2.5 rounded-chip p-2 text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-brand-ink ${removed === id ? 'bg-card text-muted line-through' : 'hover:bg-card'}`}>
             <input type="radio" name="removed-quote" checked={removed === id}
-              className="mt-0.5 shrink-0 accent-[rgb(var(--brand))]" data-testid={`proof-remove-${id}`}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[rgb(var(--brand))]" data-testid={`proof-remove-${id}`}
               onChange={() => { setRemoved(id); setGuess(null); }} />
-            <span>{(order.get(id) ?? 0) + 1}. {lesson.sentences.find((s) => s.id === id)?.text}</span>
+            <span className="wrap-any min-w-0">{(order.get(id) ?? 0) + 1}. {lesson.sentences.find((s) => s.id === id)?.text}</span>
           </label>
         ))}
       </fieldset>
@@ -317,12 +370,13 @@ function ProofTest({ task, lesson, evidence, order }: { task: Task; lesson: Less
         <div className="mt-2 space-y-2">
           <p className="text-sm">{t.question}</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-ghost text-sm" data-testid="proof-enough" onClick={() => setGuess(true)}>{t.keep}</button>
-            <button type="button" className="btn-ghost text-sm" data-testid="proof-insufficient" onClick={() => setGuess(false)}>{t.need}</button>
+            <button type="button" className="btn-ghost btn-sm" data-testid="proof-enough" onClick={() => setGuess(true)}>{t.keep}</button>
+            <button type="button" className="btn-ghost btn-sm" data-testid="proof-insufficient" onClick={() => setGuess(false)}>{t.need}</button>
           </div>
           {guess !== null && (
-            <p className="rounded-lg bg-card p-3 text-sm" role="status" data-testid="proof-feedback" data-correct={guess === enough}>
-              <b>{guess === enough ? t.expectedYes : t.expectedNo}</b> {enough ? t.yes : t.no}
+            <p className={`note ${guess === enough ? 'note-ok' : 'note-warn'}`} role="status" data-testid="proof-feedback" data-correct={guess === enough}>
+              <Icon name={guess === enough ? 'check' : 'alert'} className="mt-px h-5 w-5" />
+              <span><b>{guess === enough ? t.expectedYes : t.expectedNo}</b> {enough ? t.yes : t.no}</span>
             </p>
           )}
         </div>
@@ -408,16 +462,19 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
   return (
     <div className="pt-4 sm:pt-8" lang={lang}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className="btn-ghost" onClick={onExit}>← {t.back}</button>
-        <span className="text-sm text-muted">{LANG_NAME[lang]} · {lang === 'kk' ? `${lesson.grade}-сынып` : `${lesson.grade} класс`}</span>
+        <button type="button" className="btn-ghost btn-sm" onClick={onExit}>← {t.back}</button>
+        <span className="flex flex-wrap gap-2">
+          <span className="badge text-ink">{LANG_NAME[lang]}</span>
+          <span className="badge">{fill(t.grade, { g: lesson.grade })}</span>
+        </span>
       </div>
-      <h1 className="mt-5 text-balance font-serif text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{lesson.title}</h1>
+      <h1 className="wrap-any mt-5 font-serif text-title font-semibold">{lesson.title}</h1>
       {!finished && task && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
           <span className="flex max-w-full flex-wrap gap-1" aria-hidden="true">
-            {tasks.map((x, k) => <span key={x.id} className={`h-1.5 w-8 rounded-full ${k < idx ? 'bg-brand' : k === idx ? 'bg-brand/50' : 'bg-line'}`} />)}
+            {tasks.map((x, k) => <span key={x.id} className={`h-2 w-8 rounded-full ${k < idx ? 'bg-brand' : k === idx ? 'bg-brand/45 ring-1 ring-brand-ink ring-offset-1 ring-offset-paper' : 'border border-line-strong/50 bg-sunken'}`} />)}
           </span>
-          <span>{fill(t.task, { n: idx + 1, total: tasks.length })} · {SKILL_LABELS[lang][task.skill]}</span>
+          <span className="tabular-nums"><b className="font-semibold text-ink">{fill(t.task, { n: idx + 1, total: tasks.length })}</b> · {SKILL_LABELS[lang][task.skill]}</span>
         </div>
       )}
 
@@ -425,37 +482,42 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
 
         <section ref={questionRef} tabIndex={-1} className="card scroll-mt-4 p-5 sm:p-7 lg:sticky lg:top-4" aria-label={task?.question}>
           {finished ? (
-            <div data-testid="finished" className="space-y-4">
-              <p className="font-serif text-3xl font-semibold">{t.done}</p>
+            <div data-testid="finished" className="space-y-5">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-ok text-card" aria-hidden="true"><Icon name="check" className="h-8 w-8" /></span>
+              <div>
+                <p className="font-serif text-title font-semibold">{t.done}</p>
+                <p className="mt-2 text-muted">{t.doneLead}</p>
+              </div>
               {rec === undefined ? (
-                <p className="text-sm text-muted" role="status" data-testid="recommendation-loading">{t.recLoading}</p>
+                <p className="flex items-center gap-2 text-sm text-muted" role="status" data-testid="recommendation-loading"><Spinner />{t.recLoading}</p>
               ) : rec === 'unavailable' ? (
-                <p className="text-sm text-muted" role="status">{t.recError}</p>
+                <p className="note note-warn" role="status"><Icon name="alert" className="mt-px h-5 w-5" /><span>{t.recError}</span></p>
               ) : rec ? (
-                <div className="rounded-xl border border-line bg-paper p-4" data-testid="recommendation">
-                  <p className="text-sm">{t.weak} <b>{SKILL_LABELS[lang][rec.skill]}</b></p>
-                  <p className="mt-1 text-sm text-muted">«{rec.task.question}» — {rec.lesson.title}</p>
-                  <button type="button" className="btn mt-3" data-testid="rec-start" onClick={() => onPlay({ lesson: rec.lesson, taskIds: [rec.task.id] })}>{t.more} →</button>
+                <div className="rounded-control border border-line bg-sunken p-4" data-testid="recommendation">
+                  <p className="kicker">{t.recTitle}</p>
+                  <p className="mt-2 text-sm">{t.weak} <b>{SKILL_LABELS[lang][rec.skill]}</b></p>
+                  <p className="wrap-any mt-1 text-sm text-muted">«{rec.task.question}» — {rec.lesson.title}</p>
+                  <button type="button" className="btn mt-4" data-testid="rec-start" onClick={() => onPlay({ lesson: rec.lesson, taskIds: [rec.task.id] })}>{t.more} <Icon name="arrow-right" /></button>
                 </div>
-              ) : <p className="text-sm text-muted" data-testid="no-recommendation">{t.noRec}</p>}
-              <button type="button" className="btn-ghost" onClick={onExit}>{t.back}</button>
+              ) : <p className="note note-ok" data-testid="no-recommendation"><Icon name="check" className="mt-px h-5 w-5" /><span>{t.noRec}</span></p>}
+              <button type="button" className={rec && rec !== 'unavailable' ? 'btn-ghost' : 'btn'} onClick={onExit}>{t.back}</button>
             </div>
           ) : task ? (
-            <div className="space-y-5">
-              <p className="font-serif text-xl font-semibold leading-snug sm:text-2xl" data-testid="question">{task.question}</p>
+            <div className="space-y-6">
+              <p className="wrap-any font-serif text-subheading font-semibold sm:text-[1.375rem] sm:leading-snug" data-testid="question">{task.question}</p>
 
               <fieldset className="min-w-0">
-                <legend className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs text-paper" aria-hidden="true">1</span>{t.step1}
+                <legend className="mb-3 flex items-center gap-2.5 text-sm font-semibold">
+                  <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">1</span>{t.step1}
                 </legend>
                 <div className="space-y-2">
                   {task.options.map((o) => {
                     const sel = option === o.id;
                     return (
-                      <label key={o.id} className={`flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border p-3 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${sel ? 'border-brand bg-brand-soft' : 'border-line hover:border-brand/50'} ${result?.solved ? 'cursor-default' : ''}`}>
+                      <label key={o.id} className={`flex min-h-12 cursor-pointer items-start gap-3 rounded-control border p-3 transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${sel ? 'border-brand-ink bg-brand-soft' : 'border-line-strong/50 hover:border-brand-ink/60 hover:bg-sunken'} ${result?.solved ? 'cursor-default' : ''}`}>
                         <input type="radio" name="opt" data-testid={`opt-${o.id}`} checked={sel} disabled={checking || !!result?.solved}
                           onChange={() => { setOption(o.id); setResult(null); }} className="mt-1 h-4 w-4 shrink-0 accent-[rgb(var(--brand))]" />
-                        <span className={sel ? 'font-medium' : ''}>{o.text}</span>
+                        <span className={`wrap-any ${sel ? 'font-medium' : ''}`}>{o.text}</span>
                       </label>
                     );
                   })}
@@ -463,13 +525,13 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
               </fieldset>
 
               <div>
-                <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs text-paper" aria-hidden="true">2</span>{t.step2}
+                <p className="mb-3 flex items-center gap-2.5 text-sm font-semibold">
+                  <span className="step-dot h-6 w-6 text-xs" aria-hidden="true">2</span>{t.step2}
                 </p>
                 {evidence.length === 0 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-line p-3 text-sm text-muted" data-testid="quotes-empty">
-                    <span>{t.noQuote}</span>
-                    <button type="button" className="btn-ghost min-h-9 py-1 lg:hidden" data-testid="to-text" onClick={goText}>{t.toText}</button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-dashed border-line-strong/60 p-3 text-sm text-muted" data-testid="quotes-empty">
+                    <span className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3.5 w-5 rounded-[3px] bg-marker" />{t.noQuote}</span>
+                    <button type="button" className="btn-ghost btn-sm lg:hidden" data-testid="to-text" onClick={goText}>{t.toText}</button>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -478,56 +540,59 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
                         const n = (order.get(sid) ?? 0) + 1;
                         const s = lesson.sentences.find((x) => x.id === sid);
                         return (
-                          <li key={sid} className="flex items-start gap-2 rounded-xl bg-marker p-2.5 text-sm text-marker-ink">
-                            <span className="sent-num mt-0.5 border-transparent bg-brand text-on-brand">{n}</span>
-                            <span className="line-clamp-2 flex-1 font-serif">{s?.text}</span>
+                          <li key={sid} className="flex items-start gap-2 rounded-control bg-marker py-2 pl-2.5 pr-1 text-sm text-marker-ink">
+                            <span className="sent-num mt-0.5 border-transparent bg-ink text-paper tabular-nums">{n}</span>
+                            <span className="wrap-any line-clamp-2 min-w-0 flex-1 font-serif">{s?.text}</span>
                             {!result?.solved && (
-                              <button type="button" className="-m-1 rounded-lg px-2 py-1 text-base leading-none hover:bg-marker" aria-label={fill(t.remove, { n })} disabled={checking} onClick={() => toggle(sid)}>×</button>
+                              <button type="button" className="-my-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-chip hover:bg-marker-ink/10" aria-label={fill(t.remove, { n })} disabled={checking} onClick={() => toggle(sid)}>
+                                <Icon name="x" className="h-4 w-4" />
+                              </button>
                             )}
                           </li>
                         );
                       })}
                     </ul>
-                    {!result?.solved && <button type="button" className="text-sm font-medium text-brand-ink underline underline-offset-4 lg:hidden" data-testid="to-text" onClick={goText}>{t.toText}</button>}
+                    {!result?.solved && <button type="button" className="btn-ghost btn-sm lg:hidden" data-testid="to-text" onClick={goText}>{t.toText}</button>}
                   </div>
                 )}
               </div>
 
               {result && parts && (
                 <div role="status" data-testid="feedback" data-solved={result.solved} data-evidence={result.evidence} data-answer={result.answerCorrect}
-                  className={`space-y-2 rounded-xl border p-4 ${result.solved ? 'border-ok/40 bg-ok-soft' : 'border-line bg-paper'}`}>
-                  {result.solved && <p className="font-serif text-lg font-semibold text-ok">{t.solved}</p>}
+                  className={`space-y-2.5 rounded-control border p-4 ${result.solved ? 'border-ok/50 bg-ok-soft' : 'border-line-strong/50 bg-sunken'}`}>
+                  {result.solved && <p className="font-serif text-subheading font-semibold text-ok">{t.solved}</p>}
                   <p className="flex items-center gap-2.5 font-medium">
                     <Mark ok={result.answerCorrect} /><span data-testid="feedback-answer" data-ok={result.answerCorrect}>{parts.answer}</span>
                   </p>
                   <p className="flex items-center gap-2.5 font-medium">
                     <Mark ok={result.evidence === 'correct'} /><span data-testid="feedback-evidence" data-ok={result.evidence === 'correct'}>{parts.evidence}</span>
                   </p>
-                  {parts.tip && <p className="pl-[34px] text-sm text-muted" data-testid="feedback-tip">{parts.tip}</p>}
+                  {parts.tip && <p className="flex items-start gap-2.5 text-sm text-ink" ><Icon name="bulb" className="mt-px h-5 w-5 text-warn" /><span data-testid="feedback-tip">{parts.tip}</span></p>}
+                  {!result.solved && <p className="pl-[34px] text-sm text-muted">{t.retry}</p>}
                 </div>
               )}
               {result?.solved && evidence.length > 1 && <ProofTest task={task} lesson={lesson} evidence={evidence} order={order} />}
-              {saveError && <p role="alert" data-testid="attempt-save-error" className="rounded-xl bg-bad-soft p-3 text-sm text-bad">{t.saveError}</p>}
-              {showHint && <p className="rounded-xl border-l-4 border-marker bg-paper p-3 text-sm italic" data-testid="hint">{task.hint}</p>}
+              {saveError && <p role="alert" data-testid="attempt-save-error" className="note note-bad"><Icon name="alert" className="mt-px h-5 w-5" /><span>{t.saveError}</span></p>}
+              {showHint && <p className="note border-l-4 border-marker bg-sunken text-ink" data-testid="hint"><Icon name="bulb" className="mt-px h-5 w-5 text-warn" /><span>{task.hint}</span></p>}
               {!result && (!option || evidence.length === 0) && <p className="text-sm text-muted">{t.needBoth}</p>}
               <div className="flex flex-wrap gap-2">
                 {result?.solved
-                  ? <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="next" onClick={next}>{isLast ? t.finish : t.next} <span aria-hidden="true">→</span></button>
-                  : <button type="button" className="btn" data-testid="check" disabled={checking || !option || evidence.length === 0} onClick={() => void check()}>{checking ? t.saving : (result || saveError) ? t.recheck : t.check}</button>}
-                {!result?.solved && !showHint && <button type="button" className="btn-ghost" onClick={() => setShowHint(true)}>{t.hint}</button>}
+                  ? <button type="button" className="btn btn-lg w-full sm:w-auto" data-testid="next" onClick={next}>{isLast ? t.finish : t.next} <Icon name="arrow-right" /></button>
+                  : <button type="button" className="btn" data-testid="check" disabled={checking || !option || evidence.length === 0} onClick={() => void check()}>{checking && <Spinner />}{checking ? t.saving : (result || saveError) ? t.recheck : t.check}</button>}
+                {!result?.solved && !showHint && <button type="button" className="btn-ghost" onClick={() => setShowHint(true)}><Icon name="bulb" className="h-4 w-4" />{t.hint}</button>}
               </div>
             </div>
           ) : null}
         </section>
 
-        <article ref={textRef} tabIndex={-1} id="lesson-text" className="card scroll-mt-4 p-5 sm:p-8 lg:order-first" data-testid="text">
+        <article ref={textRef} tabIndex={-1} id="lesson-text" className="card scroll-mt-4 p-5 sm:p-8 lg:order-first" data-testid="text" aria-label={t.textLabel}>
           {!finished && (
-            <p className="mb-4 flex items-start gap-2 rounded-xl bg-paper p-3 text-sm text-muted" data-testid="text-hint">
-              <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-6 shrink-0 rounded bg-marker" />
+            <p className="mb-5 flex items-start gap-2.5 rounded-control bg-sunken p-3 text-sm text-muted" data-testid="text-hint">
+              <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-6 shrink-0 rounded-[3px] bg-marker" />
               <span>{t.textHint}</span>
             </p>
           )}
-          <p className="font-serif text-[1.13rem] leading-[2.05rem] sm:text-[1.2rem] sm:leading-[2.2rem]">
+          <p className="wrap-any max-w-measure font-serif text-[1.125rem] leading-[1.9] sm:text-reading">
             {lesson.sentences.map((s, i) => {
               const on = evidence.includes(s.id);
               return (
@@ -541,9 +606,9 @@ function Player({ play, all, onExit, onPlay }: { play: Play; all: Lesson[]; onEx
             })}
           </p>
           {!finished && (
-            <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 flex items-center justify-between gap-3 rounded-b-2xl border-t border-line bg-card/95 px-5 py-3 backdrop-blur sm:-mx-8 sm:-mb-8 sm:px-8 lg:hidden">
-              <span className="text-sm text-muted" data-testid="marked-count">{fill(t.marked, { n: evidence.length })}</span>
-              <button type="button" className="btn-ghost" data-testid="to-question" onClick={goQuestion}>{t.toQuestion}</button>
+            <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex items-center justify-between gap-3 rounded-b-card border-t border-line bg-card/95 px-5 py-3 backdrop-blur sm:-mx-8 sm:-mb-8 sm:px-8 lg:hidden">
+              <span className="flex items-center gap-2 text-sm text-muted" data-testid="marked-count"><span aria-hidden="true" className="inline-block h-3.5 w-5 rounded-[3px] bg-marker" />{fill(t.marked, { n: evidence.length })}</span>
+              <button type="button" className="btn-ghost btn-sm" data-testid="to-question" onClick={goQuestion}>{t.toQuestion}</button>
             </div>
           )}
         </article>
