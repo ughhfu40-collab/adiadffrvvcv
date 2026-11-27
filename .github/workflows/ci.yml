@@ -23,3 +23,25 @@ jobs:
       - run: VITE_STUDENT_ONLY=true npm run build
       - uses: actions/upload-artifact@v4
         with: { name: student-static-demo, path: dist }
+
+  deploy-pages:
+    # Публичное статическое демо ученика: собирается после зелёных тестов и пушится в ветку gh-pages.
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    concurrency: { group: pages, cancel-in-progress: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: VITE_STUDENT_ONLY=true npm run build && touch dist/.nojekyll
+      - name: Push dist to gh-pages
+        run: |
+          cd dist
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -qm "Demo: ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

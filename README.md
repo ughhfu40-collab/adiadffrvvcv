@@ -14,7 +14,7 @@ npm run server                      # API генерации (Fastify → Ollama
 Разработка: `npm run dev` (Vite, проксирует `/api` на `:8787`) и `npm run dev:server`.
 
 ### Два режима запуска
-1. **Публичное демо ученика (статика, без сервера):**
+1. **Публичное демо ученика (статика, без сервера):** https://ughhfu40-collab.github.io/adiadffrvvcv/ — CI пересобирает его в ветку `gh-pages` после каждого зелёного пуша в `main`. Локально:
    ```bash
    VITE_STUDENT_ONLY=true npm run build   # dist/ можно выложить на GitHub Pages / Netlify / любой хостинг
    ```
